@@ -321,7 +321,6 @@ def handle_admin_callbacks(call):
             count = get_current_file_count(code)
             file_msg += f"• 🌍 Country `+{code}` ➜ **{count} Pcs** Active\n"
             if count > 0:
-                # [বাটন ক্লিক করলে এখন সংখ্যা চাইবে]
                 markup.add(types.InlineKeyboardButton(f"📥 Download from +{code} ({count} Pcs)", callback_data=f"pnl_askamt_{code}"))
         markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup)
@@ -363,7 +362,6 @@ def handle_text(message):
         if user_id == ADMIN_ID:
             settings = load_settings()
             
-            # [এডমিন নির্দিষ্ট কয়টি ফাইল ডাউনলোড করতে চায় তার হ্যান্ডলার]
             if state.startswith("wait_amt_"):
                 code = state.replace("wait_amt_", "")
                 del admin_state[user_id]
@@ -397,12 +395,10 @@ def handle_text(message):
             except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
             return
 
-    # ওটিপি / পাসওয়ার্ড সাবমিট হ্যান্ডলার
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-    # ফোন নম্বর ইনপুট ডিটেকশন
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "")
@@ -510,6 +506,7 @@ async def process_backup(user_id, message, data):
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
     bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
     
+    # [সঠিক ট্রাই-এক্সেপ্ট ব্লক এখানে ঠিক করে দেওয়া হয়েছে যেন কোনো সিনট্যাক্স এরর না আসে]
     await asyncio.sleep(delay)
     
     max_wait_extended = 3600  
