@@ -69,11 +69,12 @@ def save_db(db):
         with open(DB_FILE, "w") as f: json.dump(db, f, indent=4)
     except: pass
 
+# ==================== [একই নম্বর পুনরায় দিলে ALREADY EXIST লক] ====================
 def is_number_locked(phone_number):
     db = load_db()
-    if "verified_numbers" not in db: db["verified_numbers"] = []
-    if "pending_numbers" not in db: db["pending_numbers"] = []
-    return (phone_number in db["verified_numbers"]) or (phone_number in db["pending_numbers"])
+    verified = db.get("verified_numbers", [])
+    pending = db.get("pending_numbers", [])
+    return (phone_number in verified) or (phone_number in pending)
 
 def add_to_pending_numbers(phone_number):
     db = load_db()
@@ -128,6 +129,15 @@ def reject_pending_account(user_id, amount):
         if db[uid]["unverified"] > 0: db[uid]["unverified"] -= 1
         db[uid]["pending_balance"] = max(0.0, round(db[uid]["pending_balance"] - amount, 2))
         save_db(db)
+
+def deduct_verified_balance(user_id, amount):
+    db = load_db()
+    uid = str(user_id)
+    if uid in db and db[uid]["verified_balance"] >= amount:
+        db[uid]["verified_balance"] = round(db[uid]["verified_balance"] - amount, 2)
+        save_db(db)
+        return True
+    return False
 
 def get_current_file_count(country_code):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
@@ -207,9 +217,16 @@ def cmd_account(message):
     )
     bot.send_message(message.chat.id, response)
 
-# ==================== [উইথড্রাও মেথড বাটন ফিক্স] ====================
+# ==================== [উইথড্র ব্যালেন্স ও মেথড ২ ডলার কন্ডিশন ফিক্স] ====================
 @bot.message_handler(commands=['withdraw'])
 def cmd_withdraw(message):
+    user_id = message.from_user.id
+    stats = get_user_stats(user_id)
+    
+    if stats['verified_balance'] < 2.0:
+        bot.send_message(message.chat.id, "❌ **Withdrawal Failed!**\n\nYour minimum balance must be at least **2.00 USDT** to request a payout.")
+        return
+
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
         types.InlineKeyboardButton("💳 BEP20", callback_data="wth_bep20"),
@@ -219,10 +236,22 @@ def cmd_withdraw(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("wth_"))
 def handle_withdraw_selection(call):
+    user_id = call.from_user.id
+    stats = get_user_stats(user_id)
+    
+    if stats['verified_balance'] < 2.0:
+        bot.answer_callback_query(call.id, "❌ Min 2.00 USDT Required!", show_alert=True)
+        return
+        
     method = "BEP20" if call.data == "wth_bep20" else "Leader Card"
     bot.answer_callback_query(call.id)
-    bot.send_message(call.message.chat.id, f"📥 Send your **{method}** wallet address/details for payout processing:")
-    admin_state[call.from_user.id] = f"entering_wallet_{method}"
+    
+    if method == "BEP20":
+        bot.send_message(call.message.chat.id, "📥 Send your **BEP20** wallet address:\n\n⚠️ *Condition: Address must be exactly 42 characters long and must start with 0x*")
+    else:
+        bot.send_message(call.message.chat.id, f"📥 Send your **{method}** card details for payout processing:")
+        
+    admin_state[user_id] = f"entering_wallet_{method}"
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("chk_time_"))
 def handle_live_timer_click(call):
@@ -247,7 +276,7 @@ def handle_live_timer_click(call):
     except:
         bot.answer_callback_query(call.id, f"⏳ {remaining}s remaining")
 
-# ==================== [এডমিন প্যানেল এবং সেশন ভিউয়ার কমান্ড] ====================
+# ==================== এডমিন প্যানেল এবং সেশন ভিউয়ার কমান্ড ====================
 @bot.message_handler(commands=['panel'])
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID: return
@@ -301,7 +330,7 @@ def handle_pnl(call):
         except Exception as e:
             bot.send_message(call.message.chat.id, f"❌ Error packing ZIP: {e}")
 
-# ==================== টেক্সট ইনপুট হ্যান্ডলিং ====================
+# ==================== টেক্সট ইনপুট এবং BEP20 কন্ডিশন ভ্যালিডেশন ====================
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
@@ -311,9 +340,28 @@ def handle_text(message):
         state = admin_state[user_id]
         if "entering_wallet_" in state:
             method = state.replace("entering_wallet_", "")
-            del admin_state[user_id]
-            bot.reply_to(message, "⏳ **Withdrawal request submitted!** Admin will review your account data shortly.")
-            bot.send_message(ADMIN_ID, f"🔔 **Withdraw Request!**\nUser: `{user_id}`\nMethod: {method}\nAddress: `{text}`")
+            stats = get_user_stats(user_id)
+            
+            if stats['verified_balance'] < 2.0:
+                del admin_state[user_id]
+                bot.reply_to(message, "❌ **Withdrawal Failed!** Balance is lower than 2.00 USDT.")
+                return
+            
+            # 🔐 [BEP20 কড়া ৪২ ক্যারেক্টার ও 0x কন্ডিশন ভ্যালিডেশন চেক]
+            if method == "BEP20":
+                if len(text) != 42 or not text.startswith("0x"):
+                    bot.reply_to(message, "❌ **Invalid BEP20 Address!**\n\nYour address must be **exactly 42 characters** long and must start with **0x**. Check and send again:")
+                    return # ইউজারকে আটকে রাখবে যতক্ষণ না সঠিক অ্যাড্রেস দেয়
+
+            # সঠিক হলে ব্যালেন্স মাইনাস হবে ও রিকোয়েস্ট সাবমিট হবে
+            withdraw_amount = stats['verified_balance']
+            if deduct_verified_balance(user_id, withdraw_amount):
+                del admin_state[user_id]
+                bot.reply_to(message, f"⏳ **Withdrawal request of {withdraw_amount:.2f} USDT submitted!** Admin will review your account data shortly.")
+                bot.send_message(ADMIN_ID, f"💰 **NEW WITHDRAWAL REQUEST!**\n\n👤 User ID: `{user_id}`\n💳 Method: `{method}`\n💵 Amount: `{withdraw_amount:.2f} USDT`\n📌 Wallet Address:\n`{text}`")
+            else:
+                del admin_state[user_id]
+                bot.reply_to(message, "❌ Error processing withdrawal balance.")
             return
             
         if user_id == ADMIN_ID and state == "wait_country_all":
@@ -344,8 +392,9 @@ def handle_text(message):
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "")
         
+        # 🔒 [ডুপ্লিকেট নম্বর চেক - ALREADY EXIST কন্ডিশন ফিক্স]
         if is_number_locked(clean_phone):
-            bot.reply_to(message, f"❌ The account number `{phone}` is already verified or currently in confirmation process.")
+            bot.reply_to(message, "❌ This account number is already exist.")
             return
             
         matched_code = check_valid_country_and_get_code(phone)
@@ -391,7 +440,8 @@ async def verify_otp_task(text, user_id, message):
     settings = load_settings()
     client = data["client"]
     
-    try: if not client.is_connected(): await client.connect()
+    try: 
+        if not client.is_connected(): await client.connect()
     except:
         bot.reply_to(message, "❌ Session disconnected. Please try again.")
         del user_data[user_id]
