@@ -8,8 +8,8 @@ from pyrogram.types import Message
 from pyrogram.errors import SessionPasswordNeeded
 
 # ==================== কনফিগারেশন ====================
-API_ID = 2648593  
-API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3c"  
+API_ID = 36547444  
+API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"  
 BOT_TOKEN = "8083684548:AAFGcdAYbXYb6X-edGyOFcdeeuRZXK05Wx0"  
 ADMIN_ID = 8095751648  
 # ===================================================
@@ -30,7 +30,7 @@ if not os.path.exists(STORAGE_DIR):
 
 user_data = {}
 
-# কাস্টম ক্লাস তৈরি করে ইভেন্ট লুপ ফিক্স করা
+# কাস্টম ক্লাস তৈরি করে ইভেন্ট LooP ফিক্স করা
 class CustomClient(Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -57,7 +57,7 @@ async def start_command(client: Client, message: Message):
     else:
         await message.reply_text(
             "👋 স্বাগতম! আপনার টেলিগ্রাম আইডির একটি জিপ ফাইল ব্যাকআপ তৈরি করতে "
-            "আপনার ফোন নম্বরটি আন্তর্জাতিক ফরম্যাটে পাঠান (যেমন: +88017XXXXXXXX)।"
+            "আপনার phone নম্বরটি আন্তর্জাতিক ফরম্যাটে পাঠান (যেমন: +88017XXXXXXXX)।"
         )
 
 @bot.on_message(filters.command("status") & filters.user(ADMIN_ID) & filters.private)
