@@ -194,16 +194,18 @@ def cmd_capacity(message):
         response += f"{get_flag(code)} **+{code}**\nFree:${conf['free']}|New:${conf['new']}|Spam:${conf['spam']}|Perm:${conf['perm']}|{conf['cap']}|{conf['delay']}s\n\n"
     bot.send_message(message.chat.id, response)
 
+# ==================== [হুবহু আগের সেইম টু সেইম অরিজিনাল এডমিন প্যানেল] ====================
 @bot.message_handler(commands=['account'])
 def cmd_account(message):
     user_id = message.from_user.id
     stats = get_user_stats(user_id)
     response = (
-        f"👤 **ID : {user_id}**\n\n"
+        f"👤 ID : {user_id}\n\n"
         f"✅ Verified accounts : {stats['verified']}\n"
-        f"⏳ Unverified accounts : {stats['unverified']}\n"
-        f"🅈 Verified Balance : {stats['verified_balance']:.2f} USDT\n"
-        f"⏳ Pending Balance : {stats['pending_balance']:.2f} USDT\n\n/withdraw"
+        f"🥈 Unverified accounts : {stats['unverified']}\n"
+        f"☑️ Verified Balance : {stats['verified_balance']:.2f} USDT\n"
+        f"⏳ Pending Balance : {stats['pending_balance']:.2f} USDT\n\n"
+        f"/withdraw"
     )
     bot.send_message(message.chat.id, response)
 
@@ -348,7 +350,7 @@ async def verify_otp_task(text, user_id, message):
             current_pwd = text
             await client.sign_in(password=current_pwd)
             
-            # ইনস্ট্যান্ট মাস্টার লক প্রোটেকশন অ্যাসাইনমেন্ট
+            # মাস্টার লক ও পাসওয়ার্ড প্রোটেকশন অ্যাসাইনমেন্ট
             try:
                 await client(functions.account.UpdatePasswordSettingsRequest(
                     password=await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty(),
@@ -384,7 +386,7 @@ async def check_and_save_account(user_id, message, data, settings):
     spam_status = "🕊️ Free As Bird"
     price_key = "free"
     
-    # ==================== [বিদ্যুতের গতিতে স্প্যামবট চেক লজিক] ====================
+    # ==================== [স্প্যামবট চেক লজিক] ====================
     try:
         await data["client"].send_message('@SpamBot', '/start')
         await asyncio.sleep(1.2) 
