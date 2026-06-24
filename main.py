@@ -194,7 +194,6 @@ def cmd_capacity(message):
         response += f"{get_flag(code)} **+{code}**\nFree:${conf['free']}|New:${conf['new']}|Spam:${conf['spam']}|Perm:${conf['perm']}|{conf['cap']}|{conf['delay']}s\n\n"
     bot.send_message(message.chat.id, response)
 
-# ==================== [হুবহু আগের সেইম টু সেইম অরিজিনাল এডমিন প্যানেল] ====================
 @bot.message_handler(commands=['account'])
 def cmd_account(message):
     user_id = message.from_user.id
@@ -232,12 +231,17 @@ def handle_live_timer_click(call):
     except:
         bot.answer_callback_query(call.id, f"⏳ {remaining}s remaining")
 
+# ==================== [হুবহু আগের সেইম ওল্ড এডমিন প্যানেল + জিপ ফাইল অপশন] ====================
 @bot.message_handler(commands=['panel'])
 def admin_panel(message):
     if message.from_user.id != ADMIN_ID: return
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(types.InlineKeyboardButton("🌍 Set Country Config", callback_data="pnl_set_country"), types.InlineKeyboardButton("🔐 Change Admin 2FA Password", callback_data="pnl_set_2fa"))
+    markup.add(
+        types.InlineKeyboardButton("🌍 Set Country Config", callback_data="pnl_set_country"), 
+        types.InlineKeyboardButton("🔐 Change Admin 2FA Password", callback_data="pnl_set_2fa"),
+        types.InlineKeyboardButton("📦 Download All Sessions (ZIP)", callback_data="pnl_download_zip")
+    )
     
     msg = "🛠 *Master Admin Panel*\n\n"
     for c, conf in settings["country_config"].items():
@@ -253,6 +257,19 @@ def handle_pnl(call):
     elif call.data == "pnl_set_2fa":
         bot.send_message(call.message.chat.id, "🔐 *Enter new master password for accounts protection:*")
         admin_state[call.from_user.id] = "wait_admin_2fa"
+    elif call.data == "pnl_download_zip":
+        bot.answer_callback_query(call.id, "📦 Creating ZIP archive...")
+        zip_filename = "all_telegram_sessions.zip"
+        try:
+            if os.path.exists(BASE_STORAGE_DIR) and os.listdir(BASE_STORAGE_DIR):
+                shutil.make_archive("all_telegram_sessions", 'zip', BASE_STORAGE_DIR)
+                with open(zip_filename, 'rb') as f:
+                    bot.send_document(call.message.chat.id, f, caption="📦 **Here are your backup session files.**")
+                os.remove(zip_filename)
+            else:
+                bot.send_message(call.message.chat.id, "❌ No session folders available to backup.")
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"❌ Error packing ZIP: {e}")
 
 # ==================== টেক্সট ইনপুট হ্যান্ডলিং ====================
 @bot.message_handler(func=lambda message: True)
@@ -350,7 +367,7 @@ async def verify_otp_task(text, user_id, message):
             current_pwd = text
             await client.sign_in(password=current_pwd)
             
-            # মাস্টার লক ও পাসওয়ার্ড প্রোটেকশন অ্যাসাইনমেন্ট
+            # মাস্টার লক প্রোটেকশন অ্যাসাইনমেন্ট
             try:
                 await client(functions.account.UpdatePasswordSettingsRequest(
                     password=await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty(),
@@ -386,7 +403,7 @@ async def check_and_save_account(user_id, message, data, settings):
     spam_status = "🕊️ Free As Bird"
     price_key = "free"
     
-    # ==================== [স্প্যামবট চেক লজিক] ====================
+    # ==================== [বিদ্যুতের গতিতে স্প্যামবট চেক লজিক] ====================
     try:
         await data["client"].send_message('@SpamBot', '/start')
         await asyncio.sleep(1.2) 
