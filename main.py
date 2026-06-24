@@ -2,7 +2,6 @@ import os
 import asyncio
 import zipfile
 from flask import Flask
-from threading import Thread
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.errors import SessionPasswordNeeded
@@ -20,30 +19,13 @@ app = Flask(__name__)
 def home():
     return "Bot is running perfectly!"
 
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
-
 STORAGE_DIR = "user_backups"
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
 user_data = {}
 
-# কাস্টম ক্লাস তৈরি করে ইভেন্ট LooP ফিক্স করা
-class CustomClient(Client):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        
-    async def start(self):
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return await super().start()
-
-bot = CustomClient("universal_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = Client("universal_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_command(client: Client, message: Message):
@@ -114,7 +96,7 @@ async def handle_login(client: Client, message: Message):
         clean_phone = phone_number.replace("+", "").replace(" ", "")
         temp_session_path = os.path.join(STORAGE_DIR, f"temp_{clean_phone}")
         
-        user_client = CustomClient(temp_session_path, api_id=API_ID, api_hash=API_HASH)
+        user_client = Client(temp_session_path, api_id=API_ID, api_hash=API_HASH)
         await user_client.connect()
         
         try:
@@ -173,17 +155,22 @@ async def handle_login(client: Client, message: Message):
                     os.remove(f"{data['temp_path']}.session")
                 del user_data[user_id]
 
-async def main_async():
-    # ব্যাকগ্রাউন্ড ওয়েব সার্ভার চালু করা
-    Thread(target=run_web, daemon=True).start()
+# দুটি সার্ভিস একসাথে রান করার মেইন ফাংশন
+async def main():
+    port = int(os.environ.get("PORT", 8080))
+    # Flask সার্ভার ব্যাকগ্রাউন্ডে স্টার্ট করা
+    config = Flask.run.__code__
+    server = asyncio.get_event_loop().run_in_executor(
+        None, lambda: app.run(host="0.0.0.0", port=port, use_reloader=False)
+    )
+    
     # টেলিগ্রাম বট স্টার্ট করা
+    print("Starting Telegram Bot...")
     await bot.start()
-    # বট রানিং রাখা
-    while True:
-        await asyncio.sleep(3600)
+    print("Telegram Bot is online!")
+    
+    # দুটিকেই সচল রাখা
+    await server
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main_async())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
