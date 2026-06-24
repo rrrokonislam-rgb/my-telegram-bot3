@@ -126,6 +126,15 @@ def reject_pending_account(user_id, amount):
         db[uid]["pending_balance"] = max(0.0, round(db[uid]["pending_balance"] - amount, 2))
         save_db(db)
 
+# [টাকা তোলার পর ব্যালেন্স কেটে শূন্য করার ফাংশন]
+def clear_user_verified_balance(user_id):
+    db = load_db()
+    uid = str(user_id)
+    if uid in db:
+        db[uid]["verified_balance"] = 0.0
+        if "balance" in db[uid]: db[uid]["balance"] = 0.0
+        save_db(db)
+
 def get_current_file_count(country_code):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
     if not os.path.exists(target_dir): return 0
@@ -224,8 +233,8 @@ def cmd_withdraw(message):
     user_id = message.from_user.id
     stats = get_user_stats(user_id)
     
-    if stats['verified'] < 1 or stats['verified_balance'] <= 0.0:
-        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is at least 1 verified account and valid balance.**")
+    if stats['verified_balance'] <= 0.0:
+        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is valid balance. Your balance is 0.00 USDT.**")
         return
         
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -238,6 +247,13 @@ def cmd_withdraw(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("wtd_"))
 def handle_withdraw_selection(call):
     user_id = call.from_user.id
+    stats = get_user_stats(user_id)
+    
+    if stats['verified_balance'] <= 0.0:
+        bot.answer_callback_query(call.id, "❌ You don't have enough balance!", show_alert=True)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        return
+        
     bot.delete_message(call.message.chat.id, call.message.message_id)
     
     if call.data == "wtd_card":
@@ -342,10 +358,19 @@ def handle_text(message):
         state = admin_state[user_id]
         
         if state == "wait_wtd_card":
-            del admin_state[user_id]
             stats = get_user_stats(user_id)
-            bot.reply_to(message, "✅ **Your Card withdrawal request has been submitted!**")
-            bot.send_message(ADMIN_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n💳 Info: {text}")
+            current_bal = stats['verified_balance']
+            if current_bal <= 0.0:
+                bot.reply_to(message, "❌ **Withdraw failed! Your verified balance is 0.00.**")
+                del admin_state[user_id]
+                return
+            
+            # [আর্থিক লুপহোল ফিক্স: ডাটাবেস ব্যালেন্স সাথে সাথে কেটে ফুরিয়ে দেওয়া হলো]
+            clear_user_verified_balance(user_id)
+            del admin_state[user_id]
+            
+            bot.reply_to(message, f"✅ **Your Card withdrawal request for {current_bal} USDT has been submitted!**")
+            bot.send_message(ADMIN_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n💳 Info: {text}")
             return
             
         elif state == "wait_wtd_bep20":
@@ -353,10 +378,20 @@ def handle_text(message):
                 bot.reply_to(message, "❌ **Invalid BEP-20 Address!** Must be 42 chars long and start with **0x**.")
                 del admin_state[user_id]
                 return
-            del admin_state[user_id]
+                
             stats = get_user_stats(user_id)
-            bot.reply_to(message, "✅ **Your USDT (BEP-20) withdrawal request has been submitted!**")
-            bot.send_message(ADMIN_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {stats['verified_balance']} USDT\n🪙 Addr: `{text}`")
+            current_bal = stats['verified_balance']
+            if current_bal <= 0.0:
+                bot.reply_to(message, "❌ **Withdraw failed! Your verified balance is 0.00.**")
+                del admin_state[user_id]
+                return
+            
+            # [আর্থিক লুপহোল ফিক্স: ডাটাবেস ব্যালেন্স সাথে সাথে কেটে ফুরিয়ে দেওয়া হলো]
+            clear_user_verified_balance(user_id)
+            del admin_state[user_id]
+            
+            bot.reply_to(message, f"✅ **Your USDT (BEP-20) withdrawal request for {current_bal} USDT has been submitted!**")
+            bot.send_message(ADMIN_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n🪙 Addr: `{text}`")
             return
 
         if user_id == ADMIN_ID:
@@ -506,7 +541,6 @@ async def process_backup(user_id, message, data):
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
     bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
     
-    # [সঠিক ট্রাই-এক্সেপ্ট ব্লক এখানে ঠিক করে দেওয়া হয়েছে যেন কোনো সিনট্যাক্স এরর না আসে]
     await asyncio.sleep(delay)
     
     max_wait_extended = 3600  
