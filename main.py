@@ -9,7 +9,7 @@ from pyrogram.errors import SessionPasswordNeeded
 # ==================== কনফিগারেশন ====================
 API_ID = 36547444  
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"  
-BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"  # আপনার নতুন টোকেন
+BOT_TOKEN = "8970655570:AAGbOC4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"  
 ADMIN_ID = 8095751648  
 # ===================================================
 
@@ -25,7 +25,6 @@ if not os.path.exists(STORAGE_DIR):
 
 user_data = {}
 
-# Pyrogram ক্লায়েন্ট তৈরি
 bot = Client("universal_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 @bot.on_message(filters.command("start") & filters.private)
@@ -156,18 +155,21 @@ async def handle_login(client: Client, message: Message):
                     os.remove(f"{data['temp_path']}.session")
                 del user_data[user_id]
 
-# রেন্ডার এবং বটের মেইন কম্বাইন্ড লুপ
-async def main():
-    # প্রথমে টেলিগ্রাম বট ব্যাকগ্রাউন্ডে স্টার্ট করা হবে
+async def start_services():
+    # প্রথমে টেলিগ্রাম বট সচল করা হচ্ছে
     await bot.start()
-    print("Telegram Bot is Online!")
+    print("--- Telegram Bot is Online ---")
     
-    # এরপর রেন্ডারের জন্য Flask ওয়েব সার্ভার চালু করা হবে
+    # এরপর রেন্ডারের জন্য Flask ওয়েব সার্ভার ব্যাকগ্রাউন্ডে রান করা হচ্ছে
     port = int(os.environ.get("PORT", 8080))
-    config = asyncio.get_event_loop().run_in_executor(
-        None, lambda: app.run(host="0.0.0.0", port=port, use_reloader=False)
-    )
-    await config
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, lambda: app.run(host="0.0.0.0", port=port, use_reloader=False))
+    
+    # বটকে রানিং রাখা
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(start_services())
+    except (KeyboardInterrupt, SystemExit):
+        pass
