@@ -15,7 +15,7 @@ from telethon.errors import SessionPasswordNeededError
 # ==================== কোর এডমিন কনফিগারেশন ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"
+BOT_TOKEN = "8288574083:AAHiqLlpjdeHxC7dw0gJvkJWbpBbxnNsh-0"
 ADMIN_ID = 8095751648
 # =========================================================
 
