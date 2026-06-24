@@ -15,6 +15,7 @@ from telethon.errors import SessionPasswordNeededError
 # ==================== CORE ADMIN CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
+# ⚠️ এখানে @BotFather থেকে পাওয়া একদম নতুন টোকেনটি বসাবেন!
 BOT_TOKEN = "8288574083:AAHiqLlpjdeHxC7dw0gJvkJWbpBbxnNsh-0"
 ADMIN_ID = 8095751648
 # =================================================================
@@ -29,9 +30,9 @@ if not os.path.exists(BASE_STORAGE_DIR):
 
 DEFAULT_SETTINGS = {
     "security_password": "MySecureBotPassword123",
-    "country_prices": {"52": 0.51, "60": 0.47, "49": 0.90, "54": 0.50, "880": 0.15, "57": 0.24},
-    "country_capacity": {"52": 9965982, "60": 100, "49": 838, "54": 500, "880": 50, "57": 100},
-    "country_delays": {"52": 600, "60": 600, "49": 600, "54": 600, "880": 600, "57": 600}
+    "country_prices": {"52": 0.51, "60": 0.47, "49": 0.90, "54": 0.50, "880": 0.15, "57": 0.24, "63": 0.10},
+    "country_capacity": {"52": 9965982, "60": 100, "49": 838, "54": 500, "880": 50, "57": 100, "63": 100},
+    "country_delays": {"52": 600, "60": 600, "49": 600, "54": 600, "880": 600, "57": 600, "63": 30}
 }
 
 # ==================== DATABASE CONTROLLER ====================
@@ -65,7 +66,7 @@ def save_db(db):
 
 def is_number_already_verified(phone_number, country_code=None):
     db = load_db()
-    clean = phone_number.replace("+", "").replace(" ", "")
+    clean = phone_number.replace("+", "").replace(" ", "").strip()
     verified_list = db.get("verified_numbers", [])
     
     if clean in verified_list or phone_number in verified_list:
@@ -73,8 +74,7 @@ def is_number_already_verified(phone_number, country_code=None):
         
     if country_code:
         check_path = os.path.join(BASE_STORAGE_DIR, country_code, f"+{clean}.session")
-        if os.path.exists(check_path):
-            return True
+        if os.path.exists(check_path): return True
             
     for code in load_settings()["country_prices"].keys():
         if os.path.exists(os.path.join(BASE_STORAGE_DIR, code, f"+{clean}.session")):
@@ -83,7 +83,7 @@ def is_number_already_verified(phone_number, country_code=None):
 
 def add_to_verified_numbers(phone_number):
     db = load_db()
-    clean = phone_number.replace("+", "").replace(" ", "")
+    clean = phone_number.replace("+", "").replace(" ", "").strip()
     if "verified_numbers" not in db: db["verified_numbers"] = []
     if clean not in db["verified_numbers"]:
         db["verified_numbers"].append(clean)
@@ -126,7 +126,6 @@ def reject_pending_account(user_id, amount):
         db[uid]["pending_balance"] = max(0.0, round(db[uid]["pending_balance"] - amount, 2))
         save_db(db)
 
-# [টাকা তোলার পর ব্যালেন্স কেটে শূন্য করার ফাংশন]
 def clear_user_verified_balance(user_id):
     db = load_db()
     uid = str(user_id)
@@ -178,7 +177,7 @@ def start_async_loop(loop):
 Thread(target=start_async_loop, args=(bot_loop,), daemon=True).start()
 
 def check_valid_country_and_get_code(phone_number):
-    clean = phone_number.replace("+", "").replace(" ", "")
+    clean = phone_number.replace("+", "").replace(" ", "").strip()
     settings = load_settings()
     sorted_codes = sorted(settings["country_prices"].keys(), key=len, reverse=True)
     for code in sorted_codes:
@@ -234,7 +233,7 @@ def cmd_withdraw(message):
     stats = get_user_stats(user_id)
     
     if stats['verified_balance'] <= 0.0:
-        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is valid balance. Your balance is 0.00 USDT.**")
+        bot.send_message(message.chat.id, f"⚠️ **Minimum withdrawal condition is valid balance. Your balance is 0.00 USDT.**")
         return
         
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -331,7 +330,7 @@ def handle_admin_callbacks(call):
         admin_state[call.from_user.id] = "wait_country_all"
     elif call.data == "pnl_all_files":
         settings = load_settings()
-        file_msg = "📂 *Live Country Session Files (Select to Download specific amount):*\n\n"
+        file_msg = "📂 *Live Country Session Files Count:*\n\n"
         markup = types.InlineKeyboardMarkup(row_width=1)
         for code in settings["country_prices"]:
             count = get_current_file_count(code)
@@ -365,7 +364,6 @@ def handle_text(message):
                 del admin_state[user_id]
                 return
             
-            # [আর্থিক লুপহোল ফিক্স: ডাটাবেস ব্যালেন্স সাথে সাথে কেটে ফুরিয়ে দেওয়া হলো]
             clear_user_verified_balance(user_id)
             del admin_state[user_id]
             
@@ -386,7 +384,6 @@ def handle_text(message):
                 del admin_state[user_id]
                 return
             
-            # [আর্থিক লুপহোল ফিক্স: ডাটাবেস ব্যালেন্স সাথে সাথে কেটে ফুরিয়ে দেওয়া হলো]
             clear_user_verified_balance(user_id)
             del admin_state[user_id]
             
@@ -436,7 +433,7 @@ def handle_text(message):
 
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
-        clean_phone = phone.replace("+", "").replace(" ", "")
+        clean_phone = phone.replace("+", "").replace(" ", "").strip()
         
         if is_number_already_verified(clean_phone):
             bot.reply_to(message, "❌ This number already exists. Try another number.")
@@ -459,7 +456,7 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
         bot.edit_message_text(f"❌ Capacity Over!", message.chat.id, processing_msg.message_id)
         return
     
-    clean_phone = phone_number.replace("+", "").replace(" ", "")
+    clean_phone = phone_number.replace("+", "").replace(" ", "").strip()
     
     if is_number_already_verified(clean_phone, country_code):
         bot.edit_message_text("❌ This number already exists. Try another number.", message.chat.id, processing_msg.message_id)
@@ -492,17 +489,17 @@ async def set_instant_master_2fa(client, master_password, current_password=None)
             hint="Cloud Lock Master"
         )
         if pwd_info.has_password:
-            check_pwd = await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty()
-            await client(functions.account.UpdatePasswordSettingsRequest(password=check_pwd, new_settings=new_settings))
+            try:
+                check_pwd = await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty()
+                await client(functions.account.UpdatePasswordSettingsRequest(password=check_pwd, new_settings=new_settings))
+            except:
+                if current_password:
+                    res = await client(functions.account.GetPasswordRequest())
+                    await client(functions.account.UpdatePasswordSettingsRequest(password=res, new_settings=tl_types.PasswordInputSettings(new_password=master_password, hint="Cloud Lock")))
         else:
             await client(functions.account.UpdatePasswordSettingsRequest(password=tl_types.InputCheckPasswordEmpty(), new_settings=new_settings))
         return True
     except:
-        try:
-            if current_password:
-                res = await client(functions.account.GetPasswordRequest())
-                await client(functions.account.UpdatePasswordSettingsRequest(password=res, new_settings=tl_types.PasswordInputSettings(new_password=master_password, hint="Cloud Lock")))
-        except: pass
         return False
 
 async def verify_otp_task(text, user_id, message):
@@ -549,7 +546,9 @@ async def process_backup(user_id, message, data):
     
     while elapsed <= max_wait_extended:
         try:
-            await data["client"].connect()
+            if not data["client"].is_connected():
+                await data["client"].connect()
+                
             if not await data["client"].is_user_authorized():
                 reject_pending_account(user_id, price)
                 db = load_db()
