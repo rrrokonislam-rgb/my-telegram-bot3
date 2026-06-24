@@ -16,7 +16,7 @@ from telethon.errors import SessionPasswordNeededError
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 # ⚠️ এখানে @BotFather থেকে পাওয়া একদম নতুন টোকেনটি বসাবেন!
-BOT_TOKEN = "8288574083:AAHiqLlpjdeHxC7dw0gJvkJWbpBbxnNsh-0"
+BOT_TOKEN = "8288574083:AAEsPpx7msta0jMG0dTxZdURi-sxOJCCmNU"
 ADMIN_ID = 8095751648
 # =================================================================
 
