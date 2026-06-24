@@ -386,9 +386,8 @@ async def check_and_save_account(user_id, message, data, settings):
     
     # ==================== [বিদ্যুতের গতিতে স্প্যামবট চেক লজিক] ====================
     try:
-        # সরাসরি মেসেজ পাঠিয়ে ইনকামিং মেসেজ লুপ থেকে ইনস্ট্যান্ট ১ সেকেন্ডে ডাটা রিড করা হবে
         await data["client"].send_message('@SpamBot', '/start')
-        await asyncio.sleep(1.2) # মেসেজ ডেলিভারি ও রেসপন্সের নিখুঁত ফাস্ট টাইমার
+        await asyncio.sleep(1.2) 
         async for msg in data["client"].iter_messages('@SpamBot', limit=1):
             bot_text = msg.text.lower()
             if "good news" in bot_text or "no limits" in bot_text:
