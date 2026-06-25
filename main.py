@@ -15,7 +15,7 @@ from telethon.errors import SessionPasswordNeededError
 # ==================== CORE CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-BOT_TOKEN = "8288574083:AAFuTtmz2pqZavP7x8jlhnWJ0Gdad8r2olk"
+BOT_TOKEN = "8288574083:AAGoLhcH2cQ1yv0xeiUv4rxFfLmB0jV2AYo"
 ADMIN_ID = 8095751648
 
 # 📢 আপনার দেওয়া চ্যানেল আইডিগুলো একবারে পারফেক্ট ফরম্যাটে বসিয়ে দেওয়া হলো
