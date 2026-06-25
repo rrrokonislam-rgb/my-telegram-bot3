@@ -17,7 +17,7 @@ from telethon.utils import get_password_hash
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 # 🛠️ আপনার দেওয়া নতুন বটের টোকেনটি এখানে বসানো হয়েছে:
-BOT_TOKEN = "8288574083:AAHiqLlpjdeHxC7dw0gJvkJWbpBbxnNsh-0"
+BOT_TOKEN = "8288574083:AAFfB6tGPzy1uAa2rMnn4BVrOeT1OhH733M"
 ADMIN_ID = 8095751648
 # =================================================================
 
