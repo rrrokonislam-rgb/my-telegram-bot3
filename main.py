@@ -602,9 +602,26 @@ async def verify_otp_task(text, user_id, message):
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
-    delay = settings.get("country_delays", {}).get(data['country_code'], 60)
-    price = settings["country_prices"].get(data['country_code'], 0.15)
+    country_code = data['country_code']
     
+    # --- নতুন চেক লজিক ---
+    if country_code not in settings.get("country_prices", {}):
+        bot.send_message(message.chat.id, f"❗ This country `+{country_code}` cannot be added right now.")
+        try: await data["client"].disconnect()
+        except: pass
+        return
+
+    current_count = get_current_file_count(country_code)
+    max_capacity = settings["country_capacity"].get(country_code, 0)
+
+    if current_count >= max_capacity:
+        bot.send_message(message.chat.id, f"❌ **Sorry!** The capacity for country `+{country_code}` is full ({current_count}/{max_capacity}).")
+        try: await data["client"].disconnect()
+        except: pass
+        return
+    # --- নতুন চেক লজিক শেষ ---
+
+    price = settings["country_prices"].get(country_code, 0.15)
     add_to_verified_numbers(data["clean_phone"])
     add_user_pending_account(user_id, price)
     
