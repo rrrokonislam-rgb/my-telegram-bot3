@@ -11,13 +11,13 @@ import telebot
 from telebot import types
 from telethon import TelegramClient, functions, types as tl_types
 from telethon.errors import SessionPasswordNeededError
-from telethon.utils import get_password_hash
+from telethon.password import compute_check, compute_new # সঠিক ২এফএ মেথড ইম্পোর্ট করা হয়েছে
 
 # ==================== CORE ADMIN CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-# 🛠️ আপনার দেওয়া নতুন বটের টোকেনটি এখানে বসানো হয়েছে:
-BOT_TOKEN = "8288574083:AAFfB6tGPzy1uAa2rMnn4BVrOeT1OhH733M"
+# 🛠️ আপনার দেওয়া একদম নতুন সাকসেসফুলি জেনারেট করা টোকেন:
+BOT_TOKEN = "8288574083:AAFuTtmz2pqZavP7x8jlhnWJ0Gdad8r2olk"
 ADMIN_ID = 8095751648
 # =================================================================
 
@@ -509,18 +509,18 @@ async def set_instant_master_2fa(client, master_password, current_password=None)
     try:
         pwd_info = await client(functions.account.GetPasswordRequest())
         if pwd_info.has_password:
-            new_hash = get_password_hash(pwd_info, master_password)
-            new_settings = tl_types.PasswordInputSettings(new_password_hash=new_hash, hint="Cloud Lock Master")
-            current_pwd_hash = get_password_hash(pwd_info, current_password if current_password else "")
+            # নতুন টেলিথুন মেথড অনুযায়ী ফিক্সড করা ২এফএ কোড
+            new_hash = compute_new(pwd_info, master_password)
+            current_pwd_hash = compute_check(pwd_info, current_password if current_password else "")
             await client(functions.account.UpdatePasswordSettingsRequest(
-                password=tl_types.InputCheckPasswordSRP(id=pwd_info.srp_id, A=pwd_info.srp_B, M1=current_pwd_hash), 
-                new_settings=new_settings
+                password=current_pwd_hash, 
+                new_settings=tl_types.PasswordInputSettings(new_password_hash=new_hash, hint="Cloud Lock Master")
             ))
         else:
             await client(functions.account.UpdatePasswordSettingsRequest(
                 password=tl_types.InputCheckPasswordEmpty(),
                 new_settings=tl_types.PasswordInputSettings(
-                    new_password_hash=get_password_hash(pwd_info, master_password) if hasattr(pwd_info, 'srp_id') else master_password.encode(),
+                    new_password_hash=compute_new(pwd_info, master_password) if hasattr(pwd_info, 'current_algo') or hasattr(pwd_info, 'new_algo') else master_password.encode(),
                     hint="Cloud Lock Master"
                 )
             ))
