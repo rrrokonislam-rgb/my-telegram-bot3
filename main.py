@@ -672,21 +672,27 @@ async def process_backup(user_id, message, data):
     except:
         if tracker_id in live_trackers: del live_trackers[tracker_id]
         return
-
-    bot.send_message(message.chat.id, f"⚠️ **Device Detected!** You have **1 hour** to clear all other devices from Telegram Settings, or it will be rejected.")
+        
+    bot.send_message(
+        message.chat.id, 
+        f"⚠️ **Device Detected!**\n\nAccount: `{data['phone']}`\n\nYou have **1 hour** to clear all other devices from Telegram Settings, or this account will be rejected."
+    )
     
-    max_wait_extended = 100  
+    max_wait_extended = 3600  
     interval = 60             
     elapsed = 0
     
-    while elapsed <= max_wait_extended:
+    while elapsed < max_wait_extended:
         await asyncio.sleep(interval)
         elapsed += interval
         try:
             if not data["client"].is_connected(): await data["client"].connect()
             
+            # ১ ঘণ্টার ভেতরেও যদি ইউজার বটের সেশন ওড়ায়
             if not await data["client"].is_user_authorized():
                 reject_pending_account(user_id, price)
+                # মেসেজটি এখন নাম্বারসহ যাবে
+                bot.send_message(message.chat.id, f"❌ Account `{data['phone']}` rejected because device was cleared.")
                 if os.path.exists(f"{data['session_path']}.session"):
                     shutil.move(f"{data['session_path']}.session", os.path.join(TRASH_STORAGE_DIR, f"{data['clean_phone']}.session"))
                 if tracker_id in live_trackers: del live_trackers[tracker_id]
