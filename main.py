@@ -340,8 +340,6 @@ def admin_panel_command(message):
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country"))
-    
-    # ❌ নতুন ডিলিট কান্ট্রি বাটন যোগ করা হলো
     markup.add(types.InlineKeyboardButton("❌ Delete/Remove Country", callback_data="pnl_del_country"), types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"))
     markup.add(types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
     
@@ -349,7 +347,6 @@ def admin_panel_command(message):
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
     markup.add(types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash"))
     
-    # 📋 তোর রিকোয়েস্ট অনুযায়ী এখান থেকে কান্ট্রি লিস্টের লেখাগুলো সম্পূর্ণ কেটে দেওয়া হয়েছে
     panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored (As Bin Storage)."
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
 
@@ -365,7 +362,6 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\nFormat: `Code=Price=Capacity=DelayTime` \n\nExample: `880=0.15=50=600`")
         admin_state[call.from_user.id] = "wait_country_all"
         
-    # ❌ ডিলিট বাটন প্রেস করলে এই মেসেজটি আসবে
     elif call.data == "pnl_del_country":
         bot.send_message(call.message.chat.id, "❌ **Enter the Country Code you want to delete:**\n\nExample: `880` or `52` (Don't use + sign)")
         admin_state[call.from_user.id] = "wait_delete_country"
@@ -490,7 +486,6 @@ def handle_text(message):
                     save_settings(settings)
                     bot.reply_to(message, f"✅ Country `+{code}` updated.")
                 
-                # ❌ ডিলিট কান্ট্রির ব্যাকএন্ড প্রসেসিং লজিক
                 elif state == "wait_delete_country":
                     code_to_del = text.replace("+", "").strip()
                     if code_to_del in settings["country_prices"]:
@@ -546,44 +541,46 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
         user_data[user_id] = {
             "client": user_client, "phone": phone_number, 
             "phone_code_hash": sent_code.phone_code_hash, "clean_phone": clean_phone, 
-            "session_path": final_session_path, "country_code": country_code,
-            "waiting_for_password": False
+            "session_path": final_session_path, "country_code": country_code
         }
         bot.edit_message_text(f"🔢 Enter the code sent to the number or send the message.\n\n🇨🇴 ( `{phone_number}` )\n\n🦤 /cancel", message.chat.id, processing_msg.message_id)
     except Exception as e:
         bot.edit_message_text(f"❌ Error: {e}", message.chat.id, processing_msg.message_id)
-        try: await user_client.disconnect()
+        try: 
+            await user_client.disconnect()
+            if os.path.exists(f"{final_session_path}.session"): os.remove(f"{final_session_path}.session")
         except: pass
-
-async def set_instant_master_2fa(client, master_password):
-    try:
-        await client.edit_2fa(new_password=master_password)
-        return True
-    except: return False
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
-    settings = load_settings()
     
-    if data.get("waiting_for_password"):
+    try:
+        # ওটিপি সাবমিট করে সাইন ইন করার চেষ্টা
+        await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
+        
+        # 🔒 যদি সাইন ইন সফল হয়, তার মানে একাউন্টে কোনো পাসওয়ার্ড (2FA) ছিল না। 
+        # এখন বট নিজের মাস্টার পাসওয়ার্ড সেট করে ব্যাকআপ প্রসেসে পাঠিয়ে দেবে।
+        settings = load_settings()
         try:
-            await data["client"].sign_in(password=text)
-            await set_instant_master_2fa(data["client"], settings["security_password"])
-            await process_backup(user_id, message, data)
-            del user_data[user_id]
-        except Exception as e: 
-            bot.reply_to(message, f"❌ Password Error: {e}")
-    else:
+            await data["client"].edit_2fa(new_password=settings["security_password"])
+        except:
+            pass
+        await process_backup(user_id, message, data)
+        del user_data[user_id]
+        
+    except SessionPasswordNeededError:
+        # ❌ যদি একাউন্টে টু-স্টেপ পাসওয়ার্ড অন থাকে, তাহলে সরাসরি রিজেক্ট হবে
+        bot.reply_to(message, "❌ **This account cannot be received!**\n\n২ স্টেপ ভেরিফিকেশন (Two-Step Verification) একটিভ থাকার কারণে অ্যাকাউন্টটি নেওয়া সম্ভব হচ্ছে না।")
         try:
-            await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
-            await set_instant_master_2fa(data["client"], settings["security_password"])
-            await process_backup(user_id, message, data)
-            del user_data[user_id]
-        except SessionPasswordNeededError:
-            bot.reply_to(message, "🔐 Two-step verification active. Enter Password:")
-            user_data[user_id]["waiting_for_password"] = True
-        except Exception as e: 
-            bot.reply_to(message, f"❌ OTP Error: {e}")
+            await data["client"].disconnect()
+            if os.path.exists(f"{data['session_path']}.session"): 
+                os.remove(f"{data['session_path']}.session")
+        except: 
+            pass
+        del user_data[user_id]
+        
+    except Exception as e: 
+        bot.reply_to(message, f"❌ OTP Error: {e}")
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
