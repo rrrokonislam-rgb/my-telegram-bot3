@@ -675,18 +675,20 @@ async def verify_otp_task(text, user_id, message):
         status = await get_spam_status(data["client"])
         if "limited" in status.lower():
             bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
-            try: await data["client"].disconnect()
-            except: pass
+            try: 
+                await data["client"].disconnect()
+            except: 
+                pass
             del user_data[user_id]
             return
     else:
         print("Spam filter is OFF, skipping check.")
 
-        # স্প্যাম ফ্রি হলে 2FA সেট হবে
-        try:
-            await data["client"].edit_2fa_password(new_password=settings["security_password"])
-        except Exception as e:
-            print(f"2FA Setup Error: {e}")
+    # স্প্যাম ফ্রি হলে বা ফিল্টার অফ থাকলে 2FA সেট হবে
+    try: 
+        await data["client"].edit_2fa_password(new_password=settings["security_password"])
+    except Exception as e:
+        print(f"2FA Setup Error: {e}")
 
         # ব্যাকআপ প্রসেস শুরু
         await process_backup(user_id, message, data)
