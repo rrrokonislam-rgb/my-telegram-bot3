@@ -382,7 +382,6 @@ def handle_admin_and_user_callbacks(call):
         if pid in live_trackers:
             rem = live_trackers[pid]
             if rem > 0:
-                # তোর রিকোয়েস্ট করা সঠিক টেক্সট এখানে সেট করা হলো
                 bot.answer_callback_query(call.id, f"⏳ আপনার অ্যাকাউন্টটি কনফার্ম হতে আরো ({rem}) সেকেন্ড সময় লাগবে", show_alert=True)
             else:
                 bot.answer_callback_query(call.id, "🔄 অ্যাকাউন্টটি ভেরিফাই করা হচ্ছে...", show_alert=False)
@@ -603,7 +602,7 @@ async def verify_otp_task(text, user_id, message):
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
-    delay = settings.get("country_delays", {}).get(data['country_code'], 60) # উদাহরণ: বাংলাদেশের জন্য ৬০ সেকেন্ড
+    delay = settings.get("country_delays", {}).get(data['country_code'], 60)
     price = settings["country_prices"].get(data['country_code'], 0.15)
     
     add_to_verified_numbers(data["clean_phone"])
@@ -616,24 +615,18 @@ async def process_backup(user_id, message, data):
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data=f"check_time_{tracker_id}"))
     received_msg = bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
     
-    # ⏱️ [কাউন্টডাউন লুপ - বাটন রিফ্রেশের জন্য]
     async def countdown_timer():
         for i in range(delay, 0, -1):
             live_trackers[tracker_id] = i
             await asyncio.sleep(1)
         live_trackers[tracker_id] = 0
-        
     asyncio.create_task(countdown_timer())
     
-    # 🛑 [মেইন লজিক ফিক্স]: নির্ধারিত টাইমের (যেমন ৬০ সেকেন্ড) মধ্যে বট কোনো ডিভাইস চেক করবে না। চুপচাপ ওয়েট করবে।
     await asyncio.sleep(delay)
     
-    # ⏱️ টাইমার ঠিক ৬০ সেকেন্ড শেষ হওয়ার মাথায় পৌঁছালে বট নিজের সেশন চেক দেবে
     try:
-        if not data["client"].is_connected(): 
-            await data["client"].connect()
+        if not data["client"].is_connected(): await data["client"].connect()
         
-        # 🛡️ [চেক ১: যদি এই ৬০ সেকেন্ডের মধ্যে ইউজার বটের সেশন ওড়ায়, অর্থাৎ বটের নিজের ডিভাইস সেশন এখন আন-অথরাইজড]
         if not await data["client"].is_user_authorized():
             reject_pending_account(user_id, price)
             db = load_db()
@@ -641,7 +634,6 @@ async def process_backup(user_id, message, data):
                 db["verified_numbers"].remove(data["clean_phone"])
                 save_db(db)
             
-            # ❌ ৬০ সেকেন্ডের মাথায় ইউজারের কাছে কনফার্মেশন এর বদলে সরাসরি এই রিজেক্ট মেসেজটি এডিট হয়ে যাবে!
             try:
                 bot.edit_message_text(
                     chat_id=message.chat.id, 
@@ -651,7 +643,6 @@ async def process_backup(user_id, message, data):
             except:
                 bot.send_message(message.chat.id, f"❌ **This account cannot be received because it is unauthorized.**")
             
-            # সেশন ফাইল সরাসরি ট্র্যাশ ফোল্ডারে চলে যাবে
             try:
                 await data["client"].disconnect()
                 if os.path.exists(f"{data['session_path']}.session"):
@@ -660,11 +651,9 @@ async def process_backup(user_id, message, data):
             if tracker_id in live_trackers: del live_trackers[tracker_id]
             return
 
-        # 🛡️ [চেক ২: বটের ডিভাইস টিকে আছে। এখন দেখবে অন্যান্য ডিভাইসগুলো ক্লিয়ার করা হয়েছে কি না]
         auths = await data["client"](functions.account.GetAuthorizationsRequest())
         other_devices = [a for a in auths.authorizations if not a.current]
         
-        # 🎉 যদি অন্যান্য সব ডিভাইস সাকসেসফুলি ক্লিয়ার করে থাকে
         if len(other_devices) == 0:
             await data["client"].disconnect()
             final_country_dir = os.path.join(BASE_STORAGE_DIR, data['country_code'])
@@ -684,7 +673,6 @@ async def process_backup(user_id, message, data):
         if tracker_id in live_trackers: del live_trackers[tracker_id]
         return
 
-    # ⏳ [১ ঘণ্টার এক্সটেন্ডেড ওয়েটিং লুপ - যদি ৬০ সেকেন্ড শেষ হওয়ার পর অন্য ডিভাইস থেকে যায়]
     bot.send_message(message.chat.id, f"⚠️ **Device Detected!** You have **1 hour** to clear all other devices from Telegram Settings, or it will be rejected.")
     
     max_wait_extended = 3600  
@@ -697,7 +685,6 @@ async def process_backup(user_id, message, data):
         try:
             if not data["client"].is_connected(): await data["client"].connect()
             
-            # ১ ঘণ্টার ভেতরেও যদি ইউজার বটের সেশন ওড়ায়
             if not await data["client"].is_user_authorized():
                 reject_pending_account(user_id, price)
                 if os.path.exists(f"{data['session_path']}.session"):
@@ -721,7 +708,6 @@ async def process_backup(user_id, message, data):
             await data["client"].disconnect()
         except: pass
 
-    # 🕒 ১ ঘণ্টা পার হয়ে গেলে ডেডিকেটেড ফোল্ডারে (timed_out_backups) মুভ হবে
     reject_pending_account(user_id, price)
     try:
         if os.path.exists(f"{data['session_path']}.session"):
