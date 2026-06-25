@@ -233,13 +233,21 @@ def cmd_cancel(message):
 def cmd_capacity(message):
     if not check_force_join(message): return
     settings = load_settings()
-    response = f"👍 **Available Countries : ({len(settings['country_prices'])})**:\n\n"
+    response = f"👍 **Available Countries : ({len(settings['country_prices'])}):**\n\n"
+    
     for code in settings["country_prices"]:
         prc = settings["country_prices"][code]
-        cap = settings["country_capacity"].get(code, 999)
+        max_cap = settings["country_capacity"].get(code, 999)
         delay = settings.get("country_delays", {}).get(code, 60)
-        response += f"🌍 **+{code}**\nFree:${prc}|New:${prc}|Spam:${prc}|Perm:${prc}|{cap}|{delay}s\n\n"
-    bot.send_message(message.chat.id, response)
+        
+        # --- এখানেই রিয়েল-টাইম গণনা হচ্ছে ---
+        current_count = get_current_file_count(code)
+        
+        # ইউজার যেন দেখে কতটি আছে এবং কত ক্যাপাসিটি বাকি আছে
+        response += f"🌍 `+{code}`\n"
+        response += f"Status: `{current_count}/{max_cap}` | Price: ${prc} | Delay: {delay}s\n\n"
+        
+    bot.reply_to(message, response, parse_mode="Markdown")
 
 @bot.message_handler(commands=['account'])
 def cmd_account(message):
