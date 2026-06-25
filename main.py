@@ -651,9 +651,7 @@ async def verify_otp_task(text, user_id, message):
 async def process_backup(user_id, message, data):
     settings = load_settings()
     country_code = data['country_code']
-    
-    # --- নতুন চেক লজিক ---
-    if country_code not in settings.get("country_prices", {}):
+    delay = settings.get("country_delays", {}).get(country_code, 60)
         bot.send_message(message.chat.id, f"❗ This country `+{country_code}` cannot be added right now.")
         try: await data["client"].disconnect()
         except: pass
