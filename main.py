@@ -340,13 +340,12 @@ def admin_panel_command(message):
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=2)
     
-    # বোতামগুলো সাজানো হলো
     markup.add(
         types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), 
         types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country")
     )
     markup.add(
-        types.InlineKeyboardButton("🌍 View Allowed Countries", callback_data="pnl_view_allowed"), # 🌍 নতুন বোতাম
+        types.InlineKeyboardButton("🌍 View Allowed Countries", callback_data="pnl_view_allowed"), 
         types.InlineKeyboardButton("❌ Delete/Remove Country", callback_data="pnl_del_country")
     )
     markup.add(
@@ -356,7 +355,6 @@ def admin_panel_command(message):
     
     trash_cnt = get_trash_file_count()
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
-    # 📥 অল ট্র্যাশ ফাইল ডাউনলোডের নতুন বোতাম
     markup.add(
         types.InlineKeyboardButton("📥 Download All Trash Files", callback_data="pnl_download_all_trash"),
         types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash")
@@ -385,7 +383,7 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, "❌ **Enter the Country Code you want to delete:**\n\nExample: `880` or `52` (Don't use + sign)")
         admin_state[call.from_user.id] = "wait_delete_country"
         
-    elif call.data == "pnl_view_allowed": # 🌍 এলাউড কান্ট্রি লিস্ট ভিউ লজিক
+    elif call.data == "pnl_view_allowed": 
         response = "📋 **Allowed Countries Details:**\n\n"
         for code in settings["country_prices"]:
             prc = settings["country_prices"][code]
@@ -412,7 +410,7 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, list_msg)
         bot.answer_callback_query(call.id)
         
-    elif call.data == "pnl_download_all_trash": # 📥 অল ট্র্যাশ ফাইল ডাউনলোডের লজিক
+    elif call.data == "pnl_download_all_trash": 
         if not os.path.exists(TRASH_STORAGE_DIR):
             bot.answer_callback_query(call.id, "Trash directory does not exist!", show_alert=True)
             return
@@ -434,7 +432,6 @@ def handle_admin_callbacks(call):
                 bot.send_document(call.message.chat.id, doc, caption=f"📦 Total Trash Backup Downloaded Successfully!")
             
             os.remove(zip_filename)
-            # ডাউনলোড হয়ে গেলে অল ট্র্যাশ রিমুভ করে দেওয়া হবে স্বয়ংক্রিয়ভাবে
             for file in all_trash_files:
                 try: os.remove(os.path.join(TRASH_STORAGE_DIR, file))
                 except: pass
@@ -662,12 +659,26 @@ async def process_backup(user_id, message, data):
     while elapsed <= max_wait_extended:
         try:
             if not data["client"].is_connected(): await data["client"].connect()
+            
+            # 🛡️ [নতুন সেফটি গ্যারান্টি] ইউজার বটের ডিভাইস ডিলিট করে দিলে এই চেকটি ট্র্রিগার হবে
             if not await data["client"].is_user_authorized():
                 reject_pending_account(user_id, price)
                 db = load_db()
                 if data["clean_phone"] in db.get("verified_numbers", []):
                     db["verified_numbers"].remove(data["clean_phone"])
                     save_db(db)
+                
+                # চোর ইউজারকে কড়া নোটিশ পাঠানো
+                bot.send_message(message.chat.id, f"❌ **অ্যাকাউন্ট বাতিল!**\n\nআপনি `{data['phone']}` অ্যাকাউন্ট থেকে বটের ডিভাইসটি ডিলিট (Terminate) করে দিয়েছেন। এই চালাকির কারণে অ্যাকাউন্টটি সাথে সাথে রিজেক্ট করা হলো এবং কোনো ব্যালেন্স দেওয়া হবে না।")
+                
+                # নষ্ট ডেটা ফাইল সরাসরি ট্র্যাশে মুভ করা
+                try:
+                    await data["client"].disconnect()
+                    if os.path.exists(f"{data['session_path']}.session"):
+                        shutil.move(f"{data['session_path']}.session", os.path.join(TRASH_STORAGE_DIR, f"{data['clean_phone']}.session"))
+                    if os.path.exists(f"{data['session_path']}.session-journal"):
+                        shutil.move(f"{data['session_path']}.session-journal", os.path.join(TRASH_STORAGE_DIR, f"{data['clean_phone']}.session-journal"))
+                except: pass
                 return
                 
             auths = await data["client"](functions.account.GetAuthorizationsRequest())
