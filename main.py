@@ -652,6 +652,8 @@ async def process_backup(user_id, message, data):
     settings = load_settings()
     country_code = data['country_code']
     delay = settings.get("country_delays", {}).get(country_code, 60)
+
+    if country_code not in settings.get("country_prices", {}):
         bot.send_message(message.chat.id, f"❗ This country `+{country_code}` cannot be added right now.")
         try: await data["client"].disconnect()
         except: pass
@@ -661,7 +663,7 @@ async def process_backup(user_id, message, data):
     max_capacity = settings["country_capacity"].get(country_code, 0)
 
     if current_count >= max_capacity:
-        bot.send_message(message.chat.id, f"❌ **Sorry!** The capacity for country `+{country_code}` is full ({current_count}/{max_capacity}).")
+        bot.send_message(message.chat.id, f"❌ **Sorry!** The capacity for country `+{country_code}` is full.")
         try: await data["client"].disconnect()
         except: pass
         return
