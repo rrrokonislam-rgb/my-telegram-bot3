@@ -554,17 +554,33 @@ def handle_text(message):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
+# ৫৫৭ নম্বর লাইন থেকে ৫৬৭ পর্যন্ত মুছে দিয়ে এটি বসাও:
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
+        
         if is_number_already_verified(clean_phone):
             bot.reply_to(message, "❌ This number already exists. Try another number.")
             return
+            
         matched_code = check_valid_country_and_get_code(phone)
-        if not matched_code: return
+        settings = load_settings()
+        
+        # ১. কান্ট্রি ভ্যালিডেশন চেক
+        if not matched_code or matched_code not in settings.get("country_prices", {}):
+            bot.reply_to(message, f"❗ This country `+{matched_code if matched_code else phone}` cannot be added right now.")
+            return
+
+        # ২. ক্যাপাসিটি চেক
+        current_count = get_current_file_count(matched_code)
+        max_capacity = settings["country_capacity"].get(matched_code, 0)
+        
+        if current_count >= max_capacity:
+            bot.reply_to(message, f"❌ **Sorry!** The capacity for country `+{matched_code}` is full ({current_count}/{max_capacity}).")
+            return
+
         processing_msg = bot.reply_to(message, "🔄 Processing please wait...")
         asyncio.run_coroutine_threadsafe(send_otp_task(phone, matched_code, user_id, message, processing_msg), bot_loop)
-
 # ==================== TELETHON ASYNC BACKEND ====================
 async def send_otp_task(phone_number, country_code, user_id, message, processing_msg):
     settings = load_settings()
