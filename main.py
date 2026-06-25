@@ -667,17 +667,20 @@ async def verify_otp_task(text, user_id, message):
             phone_code_hash=data["phone_code_hash"]
         )
 
-        # সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
-        settings = load_settings()
-        
-        if settings.get("spam_filter_active", False):
-            status = await get_spam_status(data["client"])
-            if "limited" in status.lower():
-                bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
-                try: await data["client"].disconnect()
-                except: pass
-                del user_data[user_id]
-                return
+# সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
+    settings = load_settings()
+    
+    # স্প্যাম ফিল্টার চেক
+    if settings.get("spam_filter_active", True):
+        status = await get_spam_status(data["client"])
+        if "limited" in status.lower():
+            bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
+            try: await data["client"].disconnect()
+            except: pass
+            del user_data[user_id]
+            return
+    else:
+        print("Spam filter is OFF, skipping check.")
 
         # স্প্যাম ফ্রি হলে 2FA সেট হবে
         try:
