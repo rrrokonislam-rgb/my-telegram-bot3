@@ -631,4 +631,4 @@ async def process_backup(user_id, message, data):
 if __name__ == "__main__":
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    bot.infinity_polling(skip_pending=True)
+   bot.infinity_polling(skip_updates=True) 
