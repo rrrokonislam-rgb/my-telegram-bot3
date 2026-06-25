@@ -666,7 +666,6 @@ async def verify_otp_task(text, user_id, message):
             code=text,
             phone_code_hash=data["phone_code_hash"]
         )
-
 # সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
     settings = load_settings()
     
