@@ -675,7 +675,7 @@ async def process_backup(user_id, message, data):
 
     bot.send_message(message.chat.id, f"⚠️ **Device Detected!** You have **1 hour** to clear all other devices from Telegram Settings, or it will be rejected.")
     
-    max_wait_extended = 3600  
+    max_wait_extended = 600  
     interval = 60             
     elapsed = 0
     
