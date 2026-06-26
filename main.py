@@ -676,7 +676,7 @@ async def verify_otp_task(text, user_id, message):
         if is_filter_on:
             if not is_limited:
                 # স্প্যাম ফ্রি: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
-                await data["client"].edit_2fa_password(new_password=settings["security_password"])
+                await data["client"].edit_2fa(new_password=settings["security_password"])
                 await process_backup(user_id, message, data)
             else:
                 # স্প্যাম হলে রিজেক্ট
@@ -688,7 +688,7 @@ async def verify_otp_task(text, user_id, message):
         else:
             if is_limited:
                 # স্প্যাম হলে: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
-                await data["client"].edit_2fa_password(new_password=settings["security_password"])
+                await data["client"].edit_2fa(new_password=settings["security_password"])
                 await process_backup(user_id, message, data)
             else:
                 # স্প্যাম ফ্রি হলে সরাসরি রিজেক্ট (কনফার্মেশনে যাবে না)
