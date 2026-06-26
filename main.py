@@ -42,7 +42,8 @@ DEFAULT_SETTINGS = {
     "security_password": "MySecureBotPassword123",
     "country_prices": {"52": 0.51, "60": 0.47, "49": 0.90, "54": 0.50, "880": 0.15, "57": 0.24, "63": 0.10},
     "country_capacity": {"52": 9965982, "60": 100, "49": 838, "54": 500, "880": 50, "57": 100, "63": 100},
-    "country_delays": {"52": 600, "60": 600, "49": 600, "54": 600, "880": 60, "57": 240, "63": 30}
+    "country_delays": {"52": 600, "60": 600, "49": 600, "54": 600, "880": 60, "57": 240, "63": 30},
+    "spam_checker_enabled": False  # এটি নতুন যুক্ত হলো
 }
 
 # ==================== DATABASE CONTROLLER ====================
@@ -364,7 +365,14 @@ def admin_panel_command(message):
         types.InlineKeyboardButton("📂 All Session Files", callback_data="pnl_all_files"),
         types.InlineKeyboardButton("❌ Close Panel", callback_data="pnl_close")
     )
+# admin_panel_command ফাংশনের ভেতরে:
+    settings = load_settings()
+    spam_status = "✅ ON" if settings.get("spam_checker_enabled") else "🚫 OFF"
     
+    # বিদ্যমান markup.add গুলোর সাথে এটি যোগ করুন:
+    markup.add(
+        types.InlineKeyboardButton(f"🔆 Spam Checker: {spam_status}", callback_data="pnl_toggle_spam")
+    )
     to_cnt = get_timed_out_file_count()
     trash_cnt = get_trash_file_count()
     
@@ -398,7 +406,23 @@ def handle_admin_and_user_callbacks(call):
         return
 
     if call.from_user.id != ADMIN_ID: return
-    
+
+    # এডমিন প্যানেলের বাটন লজিক
+    if call.data == "pnl_toggle_spam":
+        settings = load_settings()
+        # বর্তমান অবস্থা পরিবর্তন করা (ON থাকলে OFF, OFF থাকলে ON)
+        settings["spam_checker_enabled"] = not settings.get("spam_checker_enabled", False)
+        save_settings(settings)
+        
+        # ইউজারকে একটি পপ-আপ মেসেজ দেখানো
+        new_status = "ON" if settings["spam_checker_enabled"] else "OFF"
+        bot.answer_callback_query(call.id, f"Spam Checker is now {new_status}")
+        
+        # প্যানেল মেসেজটি আপডেট করে দেওয়া যাতে বাটনের নাম সাথে সাথে পরিবর্তিত দেখায়
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        admin_panel_command(call.message)
+        return
+        
     if call.data == "pnl_close":
         bot.delete_message(call.message.chat.id, call.message.message_id)
     elif call.data == "pnl_pass":
@@ -610,6 +634,8 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
 
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
+    settings = load_settings()
+    
     try:
         # ১. ওটিপি ভেরিফাই করার চেষ্টা
         await data["client"].sign_in(
@@ -618,12 +644,32 @@ async def verify_otp_task(text, user_id, message):
             phone_code_hash=data["phone_code_hash"]
         )
         
-        # সফল হলে ২-এফএ সেটআপ
-        settings = load_settings()
+        # ২. স্প্যাম চেকার লজিক (ধাপ ৩)
+        if settings.get("spam_checker_enabled", False):
+            try:
+                # স্প্যামবটকে মেসেজ পাঠানো
+                await data["client"].send_message("SpamBot", "/start")
+                await asyncio.sleep(2) 
+                
+                # বট থেকে শেষ মেসেজটি পড়া
+                async for msg in data["client"].iter_messages("SpamBot", limit=1):
+                    # যদি একাউন্টটি স্প্যাম ফ্রি হয়
+                    if "good news" in msg.text.lower():
+                        pass # স্প্যাম ফ্রি, এখন ২-এফএ সেটআপে যাবে
+                    else:
+                        # যদি অ্যাকাউন্ট লিমিটেড হয়
+                        bot.reply_to(message, "❌ **Access Denied!** Only Spam-Free accounts are accepted.")
+                        await data["client"].disconnect()
+                        del user_data[user_id]
+                        return
+            except Exception as e:
+                bot.reply_to(message, "⚠️ Spam check failed, but proceeding anyway.")
+
+        # ৩. ২-এফএ পাসওয়ার্ড সেটআপ
         try: await data["client"].edit_2fa(new_password=settings["security_password"])
         except: pass
         
-        # ব্যাকআপ প্রসেস শুরু
+        # ৪. ব্যাকআপ প্রসেস শুরু
         await process_backup(user_id, message, data)
         del user_data[user_id]
 
@@ -635,7 +681,6 @@ async def verify_otp_task(text, user_id, message):
 
     except Exception as e:
         error_str = str(e)
-        # ২. ভুল ওটিপি হলে মেসেজ এবং সেশন ক্লোজ
         if "PHONE_CODE_INVALID" in error_str:
             bot.reply_to(message, "❌ **Wrong OTP!** Please check the code and send it again.")
         elif "PHONE_CODE_EXPIRED" in error_str:
@@ -643,7 +688,6 @@ async def verify_otp_task(text, user_id, message):
         else:
             bot.reply_to(message, f"❌ **Error:** {error_str}")
         
-        # ভুল হলে সেশনটি ডিসকানেক্ট করে দাও যাতে মেমোরি খালি হয়
         try: await data["client"].disconnect()
         except: pass
         return
