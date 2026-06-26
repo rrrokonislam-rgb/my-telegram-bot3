@@ -660,38 +660,31 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
     try:
-        # ১. ওটিপি ভেরিফাই করার চেষ্টা
+        # ১. ওটিপি ভেরিফাই
         await data["client"].sign_in(
             phone=data["phone"],
             code=text,
             phone_code_hash=data["phone_code_hash"]
         )
 
-# সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
-    settings = load_settings()
-    
-    # ১. স্প্যাম ফিল্টার চেক
-    if settings.get("spam_filter_active", True):
-        status = await get_spam_status(data["client"])
-        if "limited" in status.lower():
-            bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
-            try: 
-                await data["client"].disconnect()
-            except: 
-                pass
-            del user_data[user_id]
-            return
-        else:
-            # স্প্যাম ফ্রি হলে লজিক নিচে ২এফএ পর্যন্ত যাবে
-            print("Account is Spam-Free, proceeding to 2FA.")
+        # ২. স্প্যাম চেক ও ২এফএ সেটআপ
+        settings = load_settings()
+        if settings.get("spam_filter_active", True):
+            status = await get_spam_status(data["client"])
+            if "limited" in status.lower():
+                bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
+                try: await data["client"].disconnect()
+                except: pass
+                del user_data[user_id]
+                return
 
-    # ২. টু-এফএ সেটআপ (যেটি ফিল্টার অন থাকলে স্প্যাম-ফ্রি একাউন্টে হবে, আর অফ থাকলে সব একাউন্টে হবে)
-    try: 
-        await data["client"].edit_2fa_password(new_password=settings["security_password"])
-    except Exception as e:
-        print(f"2FA Setup Error: {e}")
+        # ৩. ২এফএ সেটআপ
+        try:
+            await data["client"].edit_2fa_password(new_password=settings["security_password"])
+        except Exception as e:
+            print(f"2FA Setup Error: {e}")
 
-        # ব্যাকআপ প্রসেস শুরু
+        # ৪. ব্যাকআপ প্রসেস
         await process_backup(user_id, message, data)
         del user_data[user_id]
 
@@ -708,11 +701,9 @@ async def verify_otp_task(text, user_id, message):
             bot.reply_to(message, "❌ **OTP Expired!**")
         else:
             bot.reply_to(message, f"❌ **Error:** {error_str}")
-        
-        # ভুল হলে সেশনটি ডিসকানেক্ট করে দাও যাতে মেমোরি খালি হয়
         try: await data["client"].disconnect()
         except: pass
-        return
+        del user_data[user_id]
 
 async def process_backup(user_id, message, data):
     client = data["client"]
