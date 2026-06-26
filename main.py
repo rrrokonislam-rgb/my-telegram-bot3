@@ -30,7 +30,7 @@ from telethon.errors import SessionPasswordNeededError
 # ==================== CORE CONFIGURATION ====================
 API_ID = 36547444
 API_HASH = "119a3ac4fd3dc368df92ae6d81f3bb3e"
-BOT_TOKEN = "8424216052:AAHjO2yIsirQhZfsZ6Ab6QVAyA2foSuimVk"
+BOT_TOKEN = "8288574083:AAGjtwBIlm-gYLHm5DJIUvlN4ThNO1dTRlg"
 ADMIN_ID = 8095751648
 
 MAIN_CHANNEL_ID = -1003904729385          
