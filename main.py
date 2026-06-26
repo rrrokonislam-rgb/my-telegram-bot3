@@ -670,10 +670,9 @@ async def verify_otp_task(text, user_id, message):
 # সফল হলে ২-এফএ সেটআপ এবং স্প্যাম চেক
     settings = load_settings()
     
-    # স্প্যাম ফিল্টার চেক
+    # ১. স্প্যাম ফিল্টার চেক
     if settings.get("spam_filter_active", True):
         status = await get_spam_status(data["client"])
-        # যদি অ্যাকাউন্ট লিমিটেড হয়, তবেই রিজেক্ট করবে
         if "limited" in status.lower():
             bot.reply_to(message, "🚫 **Access Denied:** Account is Limited.")
             try: 
@@ -683,12 +682,10 @@ async def verify_otp_task(text, user_id, message):
             del user_data[user_id]
             return
         else:
-            # যদি স্প্যাম-ফ্রি হয়, তবে নিচের কোডে গিয়ে ২এফএ সেট করবে
+            # স্প্যাম ফ্রি হলে লজিক নিচে ২এফএ পর্যন্ত যাবে
             print("Account is Spam-Free, proceeding to 2FA.")
-    else:
-        print("Spam filter is OFF, skipping check.")
 
-    # স্প্যাম ফ্রি হলে বা ফিল্টার অফ থাকলে 2FA সেট হবে
+    # ২. টু-এফএ সেটআপ (যেটি ফিল্টার অন থাকলে স্প্যাম-ফ্রি একাউন্টে হবে, আর অফ থাকলে সব একাউন্টে হবে)
     try: 
         await data["client"].edit_2fa_password(new_password=settings["security_password"])
     except Exception as e:
