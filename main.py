@@ -654,7 +654,7 @@ async def verify_otp_task(text, user_id, message):
                 # বট থেকে শেষ মেসেজটি পড়া
                 async for msg in data["client"].iter_messages("SpamBot", limit=1):
                     # যদি একাউন্টটি স্প্যাম ফ্রি হয়
-                    if "good news" in msg_text or "unfortunately, some phone numbers may trigger" in msg_text:
+                    if "good news" in msg_text or "unfortunately, some phone numbers may" in msg_text.lower():
                         pass # স্প্যাম ফ্রি, এখন ২-এফএ সেটআপে যাবে
                     else:
                         # যদি অ্যাকাউন্ট লিমিটেড হয়
