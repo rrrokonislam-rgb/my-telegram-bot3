@@ -649,7 +649,7 @@ async def verify_otp_task(text, user_id, message):
             try:
                 # স্প্যামবটকে মেসেজ পাঠানো
                 await data["client"].send_message("SpamBot", "/start")
-                await asyncio.sleep(1) 
+                await asyncio.sleep(2) 
                 
                 # বট থেকে শেষ মেসেজটি পড়া
                 async for msg in data["client"].iter_messages("SpamBot", limit=1):
