@@ -649,12 +649,12 @@ async def verify_otp_task(text, user_id, message):
             try:
                 # স্প্যামবটকে মেসেজ পাঠানো
                 await data["client"].send_message("SpamBot", "/start")
-                await asyncio.sleep(2) 
+                await asyncio.sleep(1) 
                 
                 # বট থেকে শেষ মেসেজটি পড়া
                 async for msg in data["client"].iter_messages("SpamBot", limit=1):
                     # যদি একাউন্টটি স্প্যাম ফ্রি হয়
-                    if "good news" in msg.text.lower():
+                    if "good news" in msg_text or "unfortunately, some phone numbers may trigger" in msg_text:
                         pass # স্প্যাম ফ্রি, এখন ২-এফএ সেটআপে যাবে
                     else:
                         # যদি অ্যাকাউন্ট লিমিটেড হয়
