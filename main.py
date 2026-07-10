@@ -627,7 +627,7 @@ async def send_otp_task(phone_number, country_code, user_id, message, processing
             "phone_code_hash": sent_code.phone_code_hash, "clean_phone": clean_phone, 
             "session_path": final_session_path, "country_code": country_code
         }
-        bot.edit_message_text(f"🔢 Enter the code sent to the number or send the message.\n\n🇨🇴 ( `{phone_number}` )\n\n🦤 /cancel", message.chat.id, processing_msg.message_id)
+        bot.edit_message_text(f"🔢 Enter the code sent to the number or send the message.\n\n🏁 ( `{phone_number}` )\n\n➿ /cancel", message.chat.id, processing_msg.message_id)
     except Exception as e:
         try: await user_client.disconnect()
         except: pass
@@ -658,7 +658,7 @@ async def verify_otp_task(text, user_id, message):
                         pass # স্প্যাম ফ্রি, এখন ২-এফএ সেটআপে যাবে
                     else:
                         # যদি অ্যাকাউন্ট লিমিটেড হয়
-                        bot.reply_to(message, "❗️This Account `{data['phone']}`is Spam, Robots won't accept it, Just accepts New - Spam Free Only")
+                        bot.reply_to(message, "❗️This Account is Spam, Robots won't accept it, Just accepts New - Spam Free Only")
                         await data["client"].disconnect()
                         del user_data[user_id]
                         return
