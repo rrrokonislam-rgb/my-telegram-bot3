@@ -593,10 +593,10 @@ if text.startswith("+") or text.isdigit():
             except: pass
             if user_id in user_data: del user_data[user_id]
             
-        phone = text if text.startswith("+") else f"+{text}"
+        phone = text if text.startswith("+") or text.isdigit() else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
         
-if is_number_already_verified(clean_phone):
+        if is_number_already_verified(clean_phone):
             bot.reply_to(message, "❌ This number already exists. Try another number.")
             return
             
