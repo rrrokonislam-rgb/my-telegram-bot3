@@ -593,15 +593,14 @@ if text.startswith("+") or text.isdigit():
             except: pass
             if user_id in user_data: del user_data[user_id]
             
-        phone = text if text.startswith("+") or text.isdigit() else f"+{text}"
+        phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
         
         if is_number_already_verified(clean_phone):
             bot.reply_to(message, "❌ This number already exists. Try another number.")
-            return
-            
-        matched_code = check_valid_country_and_get_code(phone)
-        settings = load_settings()
+        else:
+            matched_code = check_valid_country_and_get_code(phone)
+            settings = load_settings()
         
         # ১. কান্ট্রি ভ্যালিডেশন চেক
         if not matched_code or matched_code not in settings.get("country_prices", {}):
