@@ -586,7 +586,12 @@ def handle_text(message):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-# ৫৫৭ নম্বর লাইন থেকে ৫৬৭ পর্যন্ত মুছে দিয়ে এটি বসাও:
+if user_id in user_data:
+            try:
+                asyncio.run_coroutine_threadsafe(user_data[user_id]["client"].disconnect(), bot_loop)
+            except: pass
+            del user_data[user_id]
+    
     if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
