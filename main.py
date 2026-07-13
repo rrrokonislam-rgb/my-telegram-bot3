@@ -781,6 +781,7 @@ async def process_backup(user_id, message, data):
             except: pass
             bot.send_message(message.chat.id, f"✅ Congratulations, the account `{data['phone']}` has been successfully verified.")
             if tracker_id in live_trackers: del live_trackers[tracker_id]
+            if user_id in user_data: del user_data[user_id]
             return
             
     except:
