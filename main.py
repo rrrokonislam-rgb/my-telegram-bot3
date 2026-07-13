@@ -591,7 +591,7 @@ if text.startswith("+") or text.isdigit():
             try:
                 asyncio.run_coroutine_threadsafe(user_data[user_id]["client"].disconnect(), bot_loop)
             except: pass
-            del user_data[user_id]
+            if user_id in user_data: del user_data[user_id]
             
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
