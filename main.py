@@ -586,7 +586,7 @@ def handle_text(message):
         asyncio.run_coroutine_threadsafe(verify_otp_task(text, user_id, message), bot_loop)
         return
 
-        if text.startswith("+") or text.isdigit():
+if text.startswith("+") or text.isdigit():
         if user_id in user_data:
             try:
                 asyncio.run_coroutine_threadsafe(user_data[user_id]["client"].disconnect(), bot_loop)
