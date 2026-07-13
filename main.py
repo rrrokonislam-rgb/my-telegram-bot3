@@ -596,7 +596,7 @@ if text.startswith("+") or text.isdigit():
         phone = text if text.startswith("+") else f"+{text}"
         clean_phone = phone.replace("+", "").replace(" ", "").strip()
         
-        if is_number_already_verified(clean_phone):
+if is_number_already_verified(clean_phone):
             bot.reply_to(message, "❌ This number already exists. Try another number.")
             return
             
