@@ -9,7 +9,7 @@ from hydrogram.types import Message
 # -------------------------------------------------------------
 API_ID = 36966114  # এখানে আপনার API ID বসান (কোনো উদ্ধৃতি চিহ্ন ছাড়া)
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
-BOT_TOKEN = "8775664193:AAEFe-x3jbPu2RJ8orQFERjJxewDFBI98qs"
+BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
 # -------------------------------------------------------------
 # ২. Flask Web Server (Render অ্যাপ সক্রিয় রাখার জন্য)
