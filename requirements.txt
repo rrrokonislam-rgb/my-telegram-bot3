@@ -5,3 +5,4 @@ tgcrypto
 aiosqlite
 pysocks
 rsa
+telethon
