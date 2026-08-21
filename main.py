@@ -37,7 +37,7 @@ web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "High-Speed Session Backup Engine Active!"
+    return "High-Speed Global Session Backup Engine Active!"
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=10000)
@@ -79,14 +79,30 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Global Single Session Worker
+# Robust Global Session Worker with Device Spoofing
 # -------------------------------------------------------------
 async def process_single_session(session_path, out_dir, two_fa_pass):
     file_name = os.path.basename(session_path)
     new_session_path = os.path.join(out_dir, f"backup_{file_name}")
 
-    p_client = TelegramClient(session_path.replace(".session", ""), API_ID, API_HASH)
-    s_client = TelegramClient(new_session_path.replace(".session", ""), API_ID, API_HASH)
+    # Spoof Official Android Device to bypass Country/IP Security Blocks
+    p_client = TelegramClient(
+        session_path.replace(".session", ""),
+        API_ID,
+        API_HASH,
+        device_model="Samsung Galaxy S23",
+        system_version="Android 13",
+        app_version="10.2.0"
+    )
+    
+    s_client = TelegramClient(
+        new_session_path.replace(".session", ""),
+        API_ID,
+        API_HASH,
+        device_model="Samsung Galaxy S23",
+        system_version="Android 13",
+        app_version="10.2.0"
+    )
 
     try:
         await p_client.connect()
@@ -99,14 +115,13 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         await s_client.connect()
         await s_client.send_code_request(phone)
 
-        # Allow extra sync time for international numbers
-        await asyncio.sleep(3)
+        # Longer sleep duration to allow cross-border OTP synchronization
+        await asyncio.sleep(6)
         otp_code = None
 
-        # Fetch up to 5 recent messages from official Telegram (777000)
-        async for nav_msg in p_client.iter_messages(777000, limit=5):
+        # Check up to 10 recent messages from 777000
+        async for nav_msg in p_client.iter_messages(777000, limit=10):
             if nav_msg.text:
-                # Regular expression to extract 4 to 6 digit OTP codes globally
                 match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
                 if match:
                     otp_code = match.group(0)
@@ -164,7 +179,7 @@ async def start_bulk_process(client: BotClient, message: Message):
     user_input = message.text.strip()
     two_fa_pass = None if user_input.lower() == "no" else user_input
 
-    msg = await message.reply_text("⚡ Unpacking archive and initializing concurrent workers...")
+    msg = await message.reply_text("⚡ Unpacking archive and initializing global workers...")
 
     user_dir = data["user_dir"]
     zip_path = data["zip_path"]
@@ -198,7 +213,7 @@ async def start_bulk_process(client: BotClient, message: Message):
 
     await msg.edit_text(f"🚀 Processing {total_files} accounts concurrently. Please wait...")
 
-    # Parallel asynchronous execution for all global accounts
+    # Concurrently process all sessions
     tasks = [process_single_session(s, output_dir, two_fa_pass) for s in session_files]
     results = await asyncio.gather(*tasks)
 
@@ -220,7 +235,7 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    # Create output archive named Backup_Sessions.zip
+    # Create final Backup_Sessions.zip
     out_zip_path = os.path.join(user_dir, "Backup_Sessions.zip")
     with zipfile.ZipFile(out_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(output_dir):
