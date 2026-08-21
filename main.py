@@ -3,6 +3,7 @@ import re
 import asyncio
 import zipfile
 import shutil
+import random
 from threading import Thread
 from flask import Flask
 from hydrogram import Client as BotClient, filters
@@ -30,6 +31,17 @@ BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
 user_states = {}
 
+# Dynamic Random Device Profiles (To mimic different phones for each account)
+DEVICE_PROFILES = [
+    {"model": "Samsung Galaxy S23 Ultra", "sys": "Android 13", "app": "10.3.2"},
+    {"model": "Xiaomi Redmi Note 12 Pro", "sys": "Android 12", "app": "10.2.1"},
+    {"model": "OnePlus 11 Pro", "sys": "Android 13", "app": "10.4.0"},
+    {"model": "Google Pixel 8 Pro", "sys": "Android 14", "app": "10.5.1"},
+    {"model": "iPhone 15 Pro Max", "sys": "iOS 17.2", "app": "10.3.0"},
+    {"model": "Realme GT Neo 5", "sys": "Android 13", "app": "10.1.5"},
+    {"model": "Vivo X90 Pro", "sys": "Android 13", "app": "10.2.0"}
+]
+
 # -------------------------------------------------------------
 # Flask Keep-Alive Web Server
 # -------------------------------------------------------------
@@ -37,7 +49,7 @@ web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "High-Speed Global Session Backup Engine Active!"
+    return "High-Speed Dynamic Device Backup Engine Active!"
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=10000)
@@ -79,29 +91,31 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Robust Global Session Worker with Device Spoofing
+# Worker with Dynamic Device Spoofing per Account
 # -------------------------------------------------------------
 async def process_single_session(session_path, out_dir, two_fa_pass):
     file_name = os.path.basename(session_path)
     new_session_path = os.path.join(out_dir, f"backup_{file_name}")
 
-    # Spoof Official Android Device to bypass Country/IP Security Blocks
+    # Pick a random device profile for EACH account uniquely
+    dev = random.choice(DEVICE_PROFILES)
+
     p_client = TelegramClient(
         session_path.replace(".session", ""),
         API_ID,
         API_HASH,
-        device_model="Samsung Galaxy S23",
-        system_version="Android 13",
-        app_version="10.2.0"
+        device_model=dev["model"],
+        system_version=dev["sys"],
+        app_version=dev["app"]
     )
     
     s_client = TelegramClient(
         new_session_path.replace(".session", ""),
         API_ID,
         API_HASH,
-        device_model="Samsung Galaxy S23",
-        system_version="Android 13",
-        app_version="10.2.0"
+        device_model=dev["model"],
+        system_version=dev["sys"],
+        app_version=dev["app"]
     )
 
     try:
@@ -115,11 +129,11 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         await s_client.connect()
         await s_client.send_code_request(phone)
 
-        # Longer sleep duration to allow cross-border OTP synchronization
-        await asyncio.sleep(6)
+        # Pause to let Telegram send OTP across global DCs
+        await asyncio.sleep(5)
         otp_code = None
 
-        # Check up to 10 recent messages from 777000
+        # Fetch up to 10 recent messages from 777000
         async for nav_msg in p_client.iter_messages(777000, limit=10):
             if nav_msg.text:
                 match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
@@ -179,7 +193,7 @@ async def start_bulk_process(client: BotClient, message: Message):
     user_input = message.text.strip()
     two_fa_pass = None if user_input.lower() == "no" else user_input
 
-    msg = await message.reply_text("⚡ Unpacking archive and initializing global workers...")
+    msg = await message.reply_text("⚡ Unpacking archive and initializing unique device workers...")
 
     user_dir = data["user_dir"]
     zip_path = data["zip_path"]
@@ -211,9 +225,9 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    await msg.edit_text(f"🚀 Processing {total_files} accounts concurrently. Please wait...")
+    await msg.edit_text(f"🚀 Processing {total_files} accounts on unique devices concurrently...")
 
-    # Concurrently process all sessions
+    # Process all sessions concurrently
     tasks = [process_single_session(s, output_dir, two_fa_pass) for s in session_files]
     results = await asyncio.gather(*tasks)
 
@@ -258,5 +272,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
 
-    print("🤖 High-Speed Engine Online...")
+    print("🤖 High-Speed Dynamic Engine Online...")
     bot.run()
