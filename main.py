@@ -5,7 +5,7 @@ import zipfile
 import shutil
 import random
 from threading import Thread
-from flask import Flask
+from flask import Flask, jsonify
 from hydrogram import Client as BotClient, filters
 from hydrogram.types import Message
 from telethon import TelegramClient
@@ -23,7 +23,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 # -------------------------------------------------------------
-# Credentials Setup (আপনার তথ্য বসান)
+# Credentials Setup
 # -------------------------------------------------------------
 API_ID = 36966114
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
@@ -41,13 +41,18 @@ DEVICE_PROFILES = [
 ]
 
 # -------------------------------------------------------------
-# Flask Web Server
+# Flask Web Server for UptimeRobot Active Ping
 # -------------------------------------------------------------
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
     return "100% Success Backup Engine Active!"
+
+# UptimeRobot এর জন্য জেনুইন Ping Route
+@web_app.route('/ping')
+def ping():
+    return jsonify({"status": "ok", "message": "Bot is alive and running!"}), 200
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=10000)
@@ -89,7 +94,7 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Unstoppable Guaranteed Worker Logic
+# Worker Logic
 # -------------------------------------------------------------
 async def process_single_session(session_path, out_dir, two_fa_pass):
     file_name = os.path.basename(session_path)
@@ -126,9 +131,8 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         await s_client.connect()
         await s_client.send_code_request(phone)
 
-        # Extended deep OTP polling loop for guaranteed reception across all DCs
         otp_code = None
-        for _ in range(6):  # Checks up to 30 seconds
+        for _ in range(6):  # Checks up to 30 seconds for global accounts
             await asyncio.sleep(5)
             async for nav_msg in p_client.iter_messages(777000, limit=10):
                 if nav_msg.text:
