@@ -21,13 +21,18 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-API_ID = 36966114  # Replace with your actual numeric API_ID
+# -------------------------------------------------------------
+# Credentials Setup
+# -------------------------------------------------------------
+API_ID = 36966114
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
 BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
 user_states = {}
 
+# -------------------------------------------------------------
 # Flask Keep-Alive Web Server
+# -------------------------------------------------------------
 web_app = Flask(__name__)
 
 @web_app.route('/')
@@ -73,6 +78,9 @@ async def handle_zip(client: BotClient, message: Message):
         "• If accounts do not have 2FA, reply with **`no`**."
     )
 
+# -------------------------------------------------------------
+# Global Single Session Worker
+# -------------------------------------------------------------
 async def process_single_session(session_path, out_dir, two_fa_pass):
     file_name = os.path.basename(session_path)
     new_session_path = os.path.join(out_dir, f"backup_{file_name}")
@@ -91,12 +99,15 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         await s_client.connect()
         await s_client.send_code_request(phone)
 
-        await asyncio.sleep(2)
+        # Allow extra sync time for international numbers
+        await asyncio.sleep(3)
         otp_code = None
 
-        async for nav_msg in p_client.iter_messages(777000, limit=3):
+        # Fetch up to 5 recent messages from official Telegram (777000)
+        async for nav_msg in p_client.iter_messages(777000, limit=5):
             if nav_msg.text:
-                match = re.search(r'\b\d{5}\b', nav_msg.text)
+                # Regular expression to extract 4 to 6 digit OTP codes globally
+                match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
                 if match:
                     otp_code = match.group(0)
                     break
@@ -139,6 +150,9 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         if s_client.is_connected():
             await s_client.disconnect()
 
+# -------------------------------------------------------------
+# Batch Processing Handler
+# -------------------------------------------------------------
 @bot.on_message(filters.private & filters.text & ~filters.command("start"))
 async def start_bulk_process(client: BotClient, message: Message):
     chat_id = message.chat.id
@@ -184,7 +198,7 @@ async def start_bulk_process(client: BotClient, message: Message):
 
     await msg.edit_text(f"🚀 Processing {total_files} accounts concurrently. Please wait...")
 
-    # Parallel asynchronous processing
+    # Parallel asynchronous execution for all global accounts
     tasks = [process_single_session(s, output_dir, two_fa_pass) for s in session_files]
     results = await asyncio.gather(*tasks)
 
@@ -206,7 +220,7 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    # Create output archive
+    # Create output archive named Backup_Sessions.zip
     out_zip_path = os.path.join(user_dir, "Backup_Sessions.zip")
     with zipfile.ZipFile(out_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(output_dir):
