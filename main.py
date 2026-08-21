@@ -16,22 +16,23 @@ from telethon.errors import (
     UserDeactivatedError
 )
 
-# Python 3.14 Event Loop Fix
 try:
     asyncio.get_event_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 # -------------------------------------------------------------
-# Credentials Setup
+# Credentials
 # -------------------------------------------------------------
 API_ID = 36966114
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
 BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
+# একই সাথে কয়টি ফাইল প্রসেস হবে (Speed Limit Control)
+MAX_CONCURRENT_TASKS = 25  
+
 user_states = {}
 
-# Official Multi-Device Profiles
 DEVICE_PROFILES = [
     {"model": "Samsung Galaxy S24 Ultra", "sys": "Android 14", "app": "10.8.1"},
     {"model": "Xiaomi 14 Pro", "sys": "Android 14", "app": "10.7.0"},
@@ -41,29 +42,28 @@ DEVICE_PROFILES = [
 ]
 
 # -------------------------------------------------------------
-# Flask Web Server for UptimeRobot Active Ping
+# Flask Server
 # -------------------------------------------------------------
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "100% Success Backup Engine Active!"
+    return "Ultra Fast Backup Engine Active!"
 
-# UptimeRobot এর জন্য জেনুইন Ping Route
 @web_app.route('/ping')
 def ping():
-    return jsonify({"status": "ok", "message": "Bot is alive and running!"}), 200
+    return jsonify({"status": "ok"}), 200
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=10000)
 
-bot = BotClient("main_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+bot = BotClient("ultra_fast_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 @bot.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: BotClient, message: Message):
     user_states[message.chat.id] = {"step": "WAITING_ZIP"}
     await message.reply_text(
-        "⚡ **Unlimited Guaranteed Session Backup Engine**\n\n"
+        "⚡ **Ultra Fast 1-Sec Session Backup Engine**\n\n"
         "Please send your **.zip** file containing `.session` files."
     )
 
@@ -94,95 +94,108 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Worker Logic
+# Fast Session Worker Function
 # -------------------------------------------------------------
-async def process_single_session(session_path, out_dir, two_fa_pass):
-    file_name = os.path.basename(session_path)
-    new_session_path = os.path.join(out_dir, f"backup_{file_name}")
+async def process_single_session_fast(semaphore, session_path, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass):
+    async with semaphore:
+        file_name = os.path.basename(session_path)
+        dev = random.choice(DEVICE_PROFILES)
 
-    dev = random.choice(DEVICE_PROFILES)
-
-    p_client = TelegramClient(
-        session_path.replace(".session", ""),
-        API_ID,
-        API_HASH,
-        device_model=dev["model"],
-        system_version=dev["sys"],
-        app_version=dev["app"]
-    )
-    
-    s_client = TelegramClient(
-        new_session_path.replace(".session", ""),
-        API_ID,
-        API_HASH,
-        device_model=dev["model"],
-        system_version=dev["sys"],
-        app_version=dev["app"]
-    )
-
-    try:
-        await p_client.connect()
-        if not await p_client.is_user_authorized():
-            return "failed"
-
-        me = await p_client.get_me()
-        phone = me.phone
-
-        await s_client.connect()
-        await s_client.send_code_request(phone)
-
-        otp_code = None
-        for _ in range(6):  # Checks up to 30 seconds for global accounts
-            await asyncio.sleep(5)
-            async for nav_msg in p_client.iter_messages(777000, limit=10):
-                if nav_msg.text:
-                    match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
-                    if match:
-                        otp_code = match.group(0)
-                        break
-            if otp_code:
-                break
-
-        if not otp_code:
-            await p_client.disconnect()
-            await s_client.disconnect()
-            return "failed"
+        p_client = TelegramClient(
+            session_path.replace(".session", ""),
+            API_ID,
+            API_HASH,
+            device_model=dev["model"],
+            system_version=dev["sys"],
+            app_version=dev["app"]
+        )
 
         try:
-            await s_client.sign_in(phone, otp_code)
-        except SessionPasswordNeededError:
-            if two_fa_pass:
-                try:
-                    await s_client.sign_in(password=two_fa_pass)
-                except PasswordHashInvalidError:
-                    await p_client.disconnect()
-                    await s_client.disconnect()
-                    if os.path.exists(new_session_path):
-                        os.remove(new_session_path)
-                    return "wrong_2fa"
-            else:
+            await asyncio.wait_for(p_client.connect(), timeout=10)
+            if not await p_client.is_user_authorized():
+                shutil.copy(session_path, os.path.join(failed_dir, file_name))
+                return "failed"
+
+            me = await p_client.get_me()
+            phone = me.phone
+
+            new_session_path = os.path.join(success_dir, f"backup_{file_name}")
+            s_client = TelegramClient(
+                new_session_path.replace(".session", ""),
+                API_ID,
+                API_HASH,
+                device_model=dev["model"],
+                system_version=dev["sys"],
+                app_version=dev["app"]
+            )
+
+            await asyncio.wait_for(s_client.connect(), timeout=10)
+            await s_client.send_code_request(phone)
+
+            # Fast OTP Capture (Max 10-12 seconds limit)
+            otp_code = None
+            for _ in range(4):
+                await asyncio.sleep(2.5)
+                async for nav_msg in p_client.iter_messages(777000, limit=5):
+                    if nav_msg.text:
+                        match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
+                        if match:
+                            otp_code = match.group(0)
+                            break
+                if otp_code:
+                    break
+
+            if not otp_code:
                 await p_client.disconnect()
                 await s_client.disconnect()
                 if os.path.exists(new_session_path):
                     os.remove(new_session_path)
-                return "wrong_2fa"
+                shutil.copy(session_path, os.path.join(failed_dir, file_name))
+                return "failed"
 
-        await p_client.disconnect()
-        await s_client.disconnect()
-        return "success"
+            try:
+                await s_client.sign_in(phone, otp_code)
+            except SessionPasswordNeededError:
+                if two_fa_pass:
+                    try:
+                        await s_client.sign_in(password=two_fa_pass)
+                    except PasswordHashInvalidError:
+                        await p_client.disconnect()
+                        await s_client.disconnect()
+                        if os.path.exists(new_session_path):
+                            os.remove(new_session_path)
+                        shutil.copy(session_path, os.path.join(wrong_2fa_dir, file_name))
+                        return "wrong_2fa"
+                else:
+                    await p_client.disconnect()
+                    await s_client.disconnect()
+                    if os.path.exists(new_session_path):
+                        os.remove(new_session_path)
+                    shutil.copy(session_path, os.path.join(wrong_2fa_dir, file_name))
+                    return "wrong_2fa"
 
-    except (AuthKeyUnregisteredError, UserDeactivatedError):
-        return "failed"
-    except Exception:
-        return "failed"
-    finally:
-        if p_client.is_connected():
             await p_client.disconnect()
-        if s_client.is_connected():
             await s_client.disconnect()
+            return "success"
+
+        except Exception:
+            shutil.copy(session_path, os.path.join(failed_dir, file_name))
+            return "failed"
+        finally:
+            if p_client.is_connected():
+                await p_client.disconnect()
+
+def create_zip_from_dir(source_dir, output_zip_path):
+    files = [f for f in os.listdir(source_dir) if f.endswith(".session")]
+    if not files:
+        return False
+    with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for file in files:
+            zipf.write(os.path.join(source_dir, file), arcname=file)
+    return True
 
 # -------------------------------------------------------------
-# Main Handler
+# Main Batch Processing
 # -------------------------------------------------------------
 @bot.on_message(filters.private & filters.text & ~filters.command("start"))
 async def start_bulk_process(client: BotClient, message: Message):
@@ -195,21 +208,26 @@ async def start_bulk_process(client: BotClient, message: Message):
     user_input = message.text.strip()
     two_fa_pass = None if user_input.lower() == "no" else user_input
 
-    msg = await message.reply_text("⚡ Unpacking archive and launching deep backup workers...")
+    msg = await message.reply_text("⚡ Processing fast archive extraction...")
 
     user_dir = data["user_dir"]
     zip_path = data["zip_path"]
     extract_dir = os.path.join(user_dir, "extracted")
-    output_dir = os.path.join(user_dir, "output")
+    
+    success_dir = os.path.join(user_dir, "success_dir")
+    failed_dir = os.path.join(user_dir, "failed_dir")
+    wrong_2fa_dir = os.path.join(user_dir, "wrong_2fa_dir")
 
     os.makedirs(extract_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(success_dir, exist_ok=True)
+    os.makedirs(failed_dir, exist_ok=True)
+    os.makedirs(wrong_2fa_dir, exist_ok=True)
 
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(extract_dir)
     except Exception as e:
-        await msg.edit_text(f"❌ Corrupt ZIP file: `{e}`")
+        await msg.edit_text(f"❌ Corrupt ZIP: `{e}`")
         shutil.rmtree(user_dir, ignore_errors=True)
         user_states.pop(chat_id, None)
         return
@@ -222,14 +240,20 @@ async def start_bulk_process(client: BotClient, message: Message):
 
     total_files = len(session_files)
     if total_files == 0:
-        await msg.edit_text("❌ No `.session` files detected inside the archive.")
+        await msg.edit_text("❌ No `.session` files found.")
         shutil.rmtree(user_dir, ignore_errors=True)
         user_states.pop(chat_id, None)
         return
 
-    await msg.edit_text(f"🚀 Backup process active for {total_files} accounts...")
+    await msg.edit_text(f"🚀 Running Turbo Engine for {total_files} accounts...")
 
-    tasks = [process_single_session(s, output_dir, two_fa_pass) for s in session_files]
+    # Semaphore concurrency control for 1-sec/acc speed
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+    tasks = [
+        process_single_session_fast(semaphore, s, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass) 
+        for s in session_files
+    ]
+    
     results = await asyncio.gather(*tasks)
 
     success_count = results.count("success")
@@ -237,32 +261,38 @@ async def start_bulk_process(client: BotClient, message: Message):
     wrong_2fa_count = results.count("wrong_2fa")
 
     report = (
-        "📊 **Batch Backup Status Report**\n\n"
+        "📊 **Batch Backup Report**\n\n"
         f"• **Total Accounts:** `{total_files}`\n"
         f"• **Successfully Backed Up:** `{success_count}`\n"
         f"• **Failed / Expired:** `{failed_count}`\n"
-        f"• **2FA Mismatch / Missing:** `{wrong_2fa_count}`\n"
+        f"• **2FA Mismatch:** `{wrong_2fa_count}`\n"
     )
 
-    if success_count == 0:
-        await msg.edit_text(f"{report}\n❌ Process failed! No active accounts were backed up.")
-        shutil.rmtree(user_dir, ignore_errors=True)
-        user_states.pop(chat_id, None)
-        return
+    await msg.edit_text(f"{report}\n📦 Sending files...")
 
-    out_zip_path = os.path.join(user_dir, "Backup_Sessions.zip")
-    with zipfile.ZipFile(out_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(output_dir):
-            for file in files:
-                zipf.write(os.path.join(root, file), arcname=file)
+    success_zip = os.path.join(user_dir, "Success_Sessions.zip")
+    if create_zip_from_dir(success_dir, success_zip):
+        await message.reply_document(
+            document=success_zip,
+            file_name="Success_Sessions.zip",
+            caption=f"✅ **Success Sessions ({success_count})**"
+        )
 
-    await msg.edit_text(f"{report}\n📦 Uploading backup archive...")
+    failed_zip = os.path.join(user_dir, "Failed_Invalid_Sessions.zip")
+    if create_zip_from_dir(failed_dir, failed_zip):
+        await message.reply_document(
+            document=failed_zip,
+            file_name="Failed_Invalid_Sessions.zip",
+            caption=f"❌ **Failed / Invalid Sessions ({failed_count})**"
+        )
 
-    await message.reply_document(
-        document=out_zip_path,
-        file_name="Backup_Sessions.zip",
-        caption=report
-    )
+    wrong_2fa_zip = os.path.join(user_dir, "Wrong_2FA_Sessions.zip")
+    if create_zip_from_dir(wrong_2fa_dir, wrong_2fa_zip):
+        await message.reply_document(
+            document=wrong_2fa_zip,
+            file_name="Wrong_2FA_Sessions.zip",
+            caption=f"🔐 **Wrong 2FA Password Sessions ({wrong_2fa_count})**"
+        )
 
     shutil.rmtree(user_dir, ignore_errors=True)
     user_states.pop(chat_id, None)
@@ -272,5 +302,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
 
-    print("🤖 Unstoppable Backup Engine Online...")
+    print("🤖 Turbo Engine Active...")
     bot.run()
