@@ -16,9 +16,9 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-API_ID = 12345678  # আপনার আসল API ID (সংখ্যা)
-API_HASH = "YOUR_API_HASH_HERE"
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+API_ID = 36966114  # আপনার আসল API ID (সংখ্যা)
+API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
+BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
 user_states = {}
 
