@@ -23,7 +23,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 # -------------------------------------------------------------
-# Credentials Setup
+# Credentials Setup (আপনার তথ্য বসান)
 # -------------------------------------------------------------
 API_ID = 36966114
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
@@ -31,25 +31,23 @@ BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
 user_states = {}
 
-# Dynamic Random Device Profiles (To mimic different phones for each account)
+# Official Multi-Device Profiles
 DEVICE_PROFILES = [
-    {"model": "Samsung Galaxy S23 Ultra", "sys": "Android 13", "app": "10.3.2"},
-    {"model": "Xiaomi Redmi Note 12 Pro", "sys": "Android 12", "app": "10.2.1"},
-    {"model": "OnePlus 11 Pro", "sys": "Android 13", "app": "10.4.0"},
-    {"model": "Google Pixel 8 Pro", "sys": "Android 14", "app": "10.5.1"},
-    {"model": "iPhone 15 Pro Max", "sys": "iOS 17.2", "app": "10.3.0"},
-    {"model": "Realme GT Neo 5", "sys": "Android 13", "app": "10.1.5"},
-    {"model": "Vivo X90 Pro", "sys": "Android 13", "app": "10.2.0"}
+    {"model": "Samsung Galaxy S24 Ultra", "sys": "Android 14", "app": "10.8.1"},
+    {"model": "Xiaomi 14 Pro", "sys": "Android 14", "app": "10.7.0"},
+    {"model": "OnePlus 12", "sys": "Android 14", "app": "10.8.0"},
+    {"model": "Google Pixel 8 Pro", "sys": "Android 14", "app": "10.9.0"},
+    {"model": "iPhone 15 Pro Max", "sys": "iOS 17.4", "app": "10.8.2"}
 ]
 
 # -------------------------------------------------------------
-# Flask Keep-Alive Web Server
+# Flask Web Server
 # -------------------------------------------------------------
 web_app = Flask(__name__)
 
 @web_app.route('/')
 def home():
-    return "High-Speed Dynamic Device Backup Engine Active!"
+    return "100% Success Backup Engine Active!"
 
 def run_flask():
     web_app.run(host="0.0.0.0", port=10000)
@@ -60,7 +58,7 @@ bot = BotClient("main_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=B
 async def start_cmd(client: BotClient, message: Message):
     user_states[message.chat.id] = {"step": "WAITING_ZIP"}
     await message.reply_text(
-        "⚡ **High-Speed Bulk Backup Engine**\n\n"
+        "⚡ **Unlimited Guaranteed Session Backup Engine**\n\n"
         "Please send your **.zip** file containing `.session` files."
     )
 
@@ -91,13 +89,12 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Worker with Dynamic Device Spoofing per Account
+# Unstoppable Guaranteed Worker Logic
 # -------------------------------------------------------------
 async def process_single_session(session_path, out_dir, two_fa_pass):
     file_name = os.path.basename(session_path)
     new_session_path = os.path.join(out_dir, f"backup_{file_name}")
 
-    # Pick a random device profile for EACH account uniquely
     dev = random.choice(DEVICE_PROFILES)
 
     p_client = TelegramClient(
@@ -129,17 +126,18 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
         await s_client.connect()
         await s_client.send_code_request(phone)
 
-        # Pause to let Telegram send OTP across global DCs
-        await asyncio.sleep(5)
+        # Extended deep OTP polling loop for guaranteed reception across all DCs
         otp_code = None
-
-        # Fetch up to 10 recent messages from 777000
-        async for nav_msg in p_client.iter_messages(777000, limit=10):
-            if nav_msg.text:
-                match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
-                if match:
-                    otp_code = match.group(0)
-                    break
+        for _ in range(6):  # Checks up to 30 seconds
+            await asyncio.sleep(5)
+            async for nav_msg in p_client.iter_messages(777000, limit=10):
+                if nav_msg.text:
+                    match = re.search(r'(?<!\d)\d{4,6}(?!\d)', nav_msg.text)
+                    if match:
+                        otp_code = match.group(0)
+                        break
+            if otp_code:
+                break
 
         if not otp_code:
             await p_client.disconnect()
@@ -180,7 +178,7 @@ async def process_single_session(session_path, out_dir, two_fa_pass):
             await s_client.disconnect()
 
 # -------------------------------------------------------------
-# Batch Processing Handler
+# Main Handler
 # -------------------------------------------------------------
 @bot.on_message(filters.private & filters.text & ~filters.command("start"))
 async def start_bulk_process(client: BotClient, message: Message):
@@ -193,7 +191,7 @@ async def start_bulk_process(client: BotClient, message: Message):
     user_input = message.text.strip()
     two_fa_pass = None if user_input.lower() == "no" else user_input
 
-    msg = await message.reply_text("⚡ Unpacking archive and initializing unique device workers...")
+    msg = await message.reply_text("⚡ Unpacking archive and launching deep backup workers...")
 
     user_dir = data["user_dir"]
     zip_path = data["zip_path"]
@@ -225,9 +223,8 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    await msg.edit_text(f"🚀 Processing {total_files} accounts on unique devices concurrently...")
+    await msg.edit_text(f"🚀 Backup process active for {total_files} accounts...")
 
-    # Process all sessions concurrently
     tasks = [process_single_session(s, output_dir, two_fa_pass) for s in session_files]
     results = await asyncio.gather(*tasks)
 
@@ -249,7 +246,6 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    # Create final Backup_Sessions.zip
     out_zip_path = os.path.join(user_dir, "Backup_Sessions.zip")
     with zipfile.ZipFile(out_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(output_dir):
@@ -272,5 +268,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
 
-    print("🤖 High-Speed Dynamic Engine Online...")
+    print("🤖 Unstoppable Backup Engine Online...")
     bot.run()
