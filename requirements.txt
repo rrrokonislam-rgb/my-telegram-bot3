@@ -1,4 +1,7 @@
-pyTelegramBotAPI==4.22.1
-telethon==1.35.0
-pycryptodome==3.20.0
-Flask==3.0.3
+hydrogram
+flask
+requests
+tgcrypto
+aiosqlite
+pysocks
+rsa
