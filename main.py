@@ -58,13 +58,52 @@ def run_flask():
 
 bot = BotClient("ultra_fast_backup_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# -------------------------------------------------------------
+# Helper Function for Cleanup & Cancellation
+# -------------------------------------------------------------
+async def cancel_user_process(chat_id):
+    if chat_id in user_states:
+        user_states[chat_id]["is_cancelled"] = True
+        
+        # চলমান সব টাস্ক বন্ধ করা
+        tasks = user_states[chat_id].get("active_tasks", [])
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        user_dir = user_states[chat_id].get("user_dir")
+        if user_dir and os.path.exists(user_dir):
+            shutil.rmtree(user_dir, ignore_errors=True)
+            
+        user_states.pop(chat_id, None)
+
+# -------------------------------------------------------------
+# Bot Commands & Message Handlers
+# -------------------------------------------------------------
 @bot.on_message(filters.command("start") & filters.private)
 async def start_cmd(client: BotClient, message: Message):
+    await cancel_user_process(message.chat.id)
     user_states[message.chat.id] = {"step": "WAITING_ZIP"}
     await message.reply_text(
         "⚡ **Ultra Fast 1-Sec Session Backup Engine**\n\n"
         "Please send your **.zip** file containing `.session` files."
     )
+
+@bot.on_message(filters.command("cancel") & filters.private)
+async def cancel_cmd(client: BotClient, message: Message):
+    chat_id = message.chat.id
+    if chat_id in user_states:
+        await cancel_user_process(chat_id)
+        await message.reply_text("❌ **All Operations Cancelled!**")
+    else:
+        await message.reply_text("ℹ️ No active process to cancel.")
+
+@bot.on_callback_query(filters.regex("cancel_process"))
+async def handle_cancel_callback(client: BotClient, callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    await cancel_user_process(chat_id)
+    await callback.answer("🚫 Process Cancelled!", show_alert=True)
+    await callback.message.edit_text("❌ **All Operations Cancelled!**")
 
 @bot.on_message(filters.private & filters.document)
 async def handle_zip(client: BotClient, message: Message):
@@ -95,7 +134,7 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Strict Isolated Worker Function
+# Worker Processing Function
 # -------------------------------------------------------------
 async def process_single_session_fast(chat_id, semaphore, session_path, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass):
     if user_states.get(chat_id, {}).get("is_cancelled", False):
@@ -130,7 +169,6 @@ async def process_single_session_fast(chat_id, semaphore, session_path, success_
             me = await p_client.get_me()
             phone = me.phone
 
-            # Temp path, backup session won't move to success_dir until sign-in succeeds
             temp_session_name = f"backup_{file_name}"
             temp_session_path = os.path.join(user_states[chat_id]["user_dir"], temp_session_name)
             
@@ -146,7 +184,6 @@ async def process_single_session_fast(chat_id, semaphore, session_path, success_
             await asyncio.wait_for(s_client.connect(), timeout=10)
             await s_client.send_code_request(phone)
 
-            # Fast OTP Capture
             otp_code = None
             for _ in range(4):
                 if user_states.get(chat_id, {}).get("is_cancelled", False):
@@ -198,7 +235,6 @@ async def process_single_session_fast(chat_id, semaphore, session_path, success_
             await p_client.disconnect()
             await s_client.disconnect()
 
-            # ONLY move to success_dir after full successful authentication
             final_success_path = os.path.join(success_dir, temp_session_name)
             if os.path.exists(temp_session_path):
                 shutil.move(temp_session_path, final_success_path)
@@ -222,31 +258,9 @@ def create_zip_from_dir(source_dir, output_zip_path):
     return True
 
 # -------------------------------------------------------------
-# Cancel Button Callback Handler
+# Main Text Process Handler
 # -------------------------------------------------------------
-@bot.on_callback_query(filters.regex("cancel_process"))
-async def handle_cancel(client: BotClient, callback: CallbackQuery):
-    chat_id = callback.message.chat.id
-    if chat_id in user_states:
-        user_states[chat_id]["is_cancelled"] = True
-        
-        tasks = user_states[chat_id].get("active_tasks", [])
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-
-        await callback.answer("🚫 Process Cancelled!", show_alert=True)
-        await callback.message.edit_text("❌ **All Operations Cancelled!**")
-        
-        user_dir = user_states[chat_id].get("user_dir")
-        if user_dir and os.path.exists(user_dir):
-            shutil.rmtree(user_dir, ignore_errors=True)
-        user_states.pop(chat_id, None)
-
-# -------------------------------------------------------------
-# Main Batch Processing Logic
-# -------------------------------------------------------------
-@bot.on_message(filters.private & filters.text & ~filters.command("start"))
+@bot.on_message(filters.private & filters.text & ~filters.command(["start", "cancel"]))
 async def start_bulk_process(client: BotClient, message: Message):
     chat_id = message.chat.id
     data = user_states.get(chat_id)
@@ -332,7 +346,6 @@ async def start_bulk_process(client: BotClient, message: Message):
 
     await msg.edit_text(f"{report}\n📦 Sending categorized files...")
 
-    # ONLY send ZIP if the count is greater than 0 and ZIP was created
     if success_count > 0:
         success_zip = os.path.join(user_dir, "Success_Sessions.zip")
         if create_zip_from_dir(success_dir, success_zip):
@@ -368,5 +381,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
 
-    print("🤖 Turbo Engine Active with Strict Isolated Output...")
+    print("🤖 Turbo Engine Active with Fixed Cancel Command & Buttons...")
     bot.run()
