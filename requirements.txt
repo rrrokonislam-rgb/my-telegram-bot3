@@ -1,8 +1,2 @@
-hydrogram
-flask
-requests
-tgcrypto
-aiosqlite
-pysocks
-rsa
 telethon
+flask
